@@ -672,8 +672,8 @@ function rebuildTray() {
     // her biochip's look when she's put away (renderer chips.js, by id)
     {
       label: t.chipLook || 'Chip look',
-      submenu: [['blackout', 'Blackout'], ['hybrid', 'Black & silver'], ['label', 'Black label'], ['relic', 'Relic'], ['crimson', 'Crimson circuit'], ['teal', 'Teal glitter'], ['industrial', 'Industrial']].map(([chipStyle, label]) => ({
-        label, type: 'radio', checked: (cfg.chipStyle || 'blackout') === chipStyle, click: () => updateConfig({ chipStyle }),
+      submenu: [['wall', 'Blackwall circuit'], ['blackout', 'Blackout'], ['hybrid', 'Black & silver'], ['label', 'Black label'], ['relic', 'Relic'], ['crimson', 'Crimson circuit'], ['teal', 'Teal glitter'], ['industrial', 'Industrial']].map(([chipStyle, label]) => ({
+        label, type: 'radio', checked: (cfg.chipStyle || 'wall') === chipStyle, click: () => updateConfig({ chipStyle }),
       })),
     },
     // the coding assistant she watches (a new one: she says hello and offers to plug herself in), or none
@@ -1406,8 +1406,8 @@ function main() {
     // her Kokoro voice ("her own", the other Capri's free voice), picked once when it's here (Voice >
     // Voice still lists the Piper ones)
     if (!config.load().kokoroSet && speech.state({ ...config.load(), ttsVoice: 'kokoro_capri' }).mouth) config.save({ ttsVoice: 'kokoro_capri', kokoroSet: true });
-    // the all-black chip, once, for whoever had the old default (Black & silver): her menu's Chip look after that
-    if (!config.load().chipBlackSet) config.save({ chipBlackSet: true, ...(config.load().chipStyle === 'hybrid' && { chipStyle: 'blackout' }) });
+    // the Blackwall circuit chip, once, for whoever had one of the old defaults: her menu's Chip look after that
+    if (!config.load().chipWallSet) config.save({ chipWallSet: true, chipBlackSet: true, ...(['hybrid', 'blackout'].includes(config.load().chipStyle) && { chipStyle: 'wall' }) });
     // she starts with Windows, set once (her menu's "Start with Windows" takes it back, for good)
     if (!config.load().loginSet && process.platform === 'win32') {
       app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });

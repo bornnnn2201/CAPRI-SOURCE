@@ -1,4 +1,4 @@
-// Her biochip's looks (chip.js): six shards the way Edgerunners draws them, lying on their side,
+// Her biochip's looks (chip.js): her shards the way Edgerunners draws them, lying on their side,
 // each hers. Flat cel tones, ink lines, hard glints, her violet misregistration behind, and her face
 // (her mask, its eyes) on every one. Design px, CHIP_SIZE wide and high; the prongs point right.
 //
@@ -417,7 +417,176 @@ const hybrid = (ctx, s) => hybridIn(ctx, s, { ...SILVER, trace: 'rgba(214, 218, 
 const BLACKOUT = { lit: '#5a5368', mid: '#2b2733', dark: '#121016', trace: 'rgba(255, 70, 120, 0.75)', text: '#9b2e52' };
 const blackout = (ctx, s) => hybridIn(ctx, s, BLACKOUT);
 
+// ---------- 8. Blackwall circuit: Crimson circuit's shape in darker glass with the Blackwall moving in
+// it (dark data falling down its columns, and now and then the wall surging up red through all of
+// it), gold traces with solder pads and light running along them, a little chip of hers on the board,
+// her glitter, her eyes in the black cap, and for an end a collar and a real edge connector ----------
+
+const W = {
+  cap: [[4, 14], [44, 14], [48, 18], [48, 50], [44, 54], [4, 54]],
+  slab: [[46, 16], [164, 16], [170, 22], [170, 46], [164, 52], [46, 52]],
+  collar: [[168, 19], [181, 19], [181, 49], [168, 49]],
+  tongue: [[180, 23], [204, 23], [210, 28], [210, 40], [204, 45], [199, 45], [199, 41], [195, 41], [195, 45], [180, 45]],
+};
+const WALL_TRACES = [
+  [[52, 24], [78, 24], [84, 30], [104, 30], [112, 22], [150, 22]], [[52, 45], [70, 45], [76, 39], [106, 39], [112, 45], [160, 45]],
+  [[56, 34], [111, 34]], [[133, 30], [148, 30], [154, 25], [167, 25]], [[133, 36], [167, 36]], [[90, 45], [94, 50]],
+  [[124, 39], [124, 48], [140, 48]], [[60, 28], [60, 40]],
+];
+const GOLD = { lit: '#ffe08a', mid: '#e0a83a', dark: '#8a5a12' };
+
+// a point `d` along a trace (and how far it is in all)
+function along(pts, d) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  if (d === undefined) return total;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    if (d <= len) return [x0 + ((x1 - x0) * d) / len, y0 + ((y1 - y0) * d) / len];
+    d -= len;
+  }
+  return pts[pts.length - 1];
+}
+
+function trace(ctx, t, dx = 0) {
+  ctx.beginPath(); t.forEach(([x, y], j) => (j ? ctx.lineTo(x + dx, y) : ctx.moveTo(x + dx, y))); ctx.stroke();
+}
+
+function blackwallCircuit(ctx, s) {
+  const shapes = [W.cap, W.slab, W.collar, W.tongue];
+  if (backing(ctx, shapes, s)) return;
+  const t = s.drift / 12; // seconds (0, still, with reduced motion)
+  const asleep = s.mode === 'sleep';
+  const alert = s.mode === 'alert' && s.blink;
+  // the wall surging up through the board every nine seconds (always, alerted), for most of a second
+  const ph = t % 9;
+  const surge = alert ? 1 : !t || asleep ? 0 : ph < 0.15 ? ph / 0.15 : ph < 0.9 ? 1 - (ph - 0.15) / 0.75 : 0;
+
+  // the slab: dark crimson glass, lit from inside
+  poly(ctx, W.slab);
+  const g = ctx.createLinearGradient(0, 16, 0, 52);
+  g.addColorStop(0, alert ? '#ff3d6e' : '#c8153f'); g.addColorStop(0.55, '#7a0a28'); g.addColorStop(1, '#3a0414');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.save(); poly(ctx, W.slab); ctx.clip();
+  const glow = ctx.createLinearGradient(0, 16, 0, 52);
+  glow.addColorStop(0, 'rgba(255, 60, 110, 0)'); glow.addColorStop(0.45, `rgba(255, 70, 120, ${asleep ? 0.12 : 0.32})`); glow.addColorStop(1, 'rgba(255, 60, 110, 0)');
+  ctx.fillStyle = glow; ctx.fillRect(46, 16, 126, 36);
+  // the Blackwall in it: dark data falling down its columns, a red head on some of them
+  for (let c = 0; c < 21; c++) {
+    const x = 48 + c * 6;
+    const speed = 8 + hash(c, 7) * 22;
+    for (let k = 0; k < 3; k++) {
+      const y = 12 + ((t * speed + hash(c, k + 1) * 60 + k * 15) % 46);
+      const h = 3 + hash(c, k + 4) * 6;
+      ctx.fillStyle = `rgba(10, 0, 6, ${0.46 + 0.3 * surge})`;
+      ctx.fillRect(x, y, 4, h);
+      if (k === 0 && hash(c, Math.floor(t * 3)) > 0.78) {
+        ctx.fillStyle = `rgba(255, 50, 100, ${asleep ? 0.2 : 0.55})`;
+        ctx.fillRect(x, y + h, 4, 1.6);
+      }
+    }
+  }
+  // her glitter, drifting through it
+  glitter(ctx, s, 48, 18, 120, 32, { n: asleep ? 40 : 90, spread: 0.6 });
+  // a little chip of hers on the board: black, gold legs, its own light
+  ctx.fillStyle = '#0e0a12'; ctx.fillRect(112, 27, 20, 14);
+  ctx.fillStyle = GOLD.mid;
+  for (let i = 0; i < 4; i++) { ctx.fillRect(114 + i * 5, 25, 2, 2); ctx.fillRect(114 + i * 5, 41, 2, 2); }
+  ctx.strokeStyle = INK; ctx.lineWidth = 1; ctx.strokeRect(112, 27, 20, 14);
+  ctx.fillStyle = '#2a2236'; ctx.fillRect(113, 28, 18, 1.2);
+  ctx.fillStyle = Math.floor(t * 2) % 2 && !asleep ? COLORS.red : '#4a1a2a'; ctx.fillRect(127, 37, 2.5, 2);
+  label(ctx, 'BW', 115, 37, 5, '#6d6480');
+  // gold traces: solder pads at their ends, a via here and there, offset in red and cyan when she glitches
+  ctx.lineWidth = 1.4;
+  if (s.glitch) {
+    ctx.strokeStyle = 'rgba(255, 60, 110, 0.6)'; WALL_TRACES.forEach((tr) => trace(ctx, tr, s.glitch));
+    ctx.strokeStyle = 'rgba(120, 220, 255, 0.5)'; WALL_TRACES.forEach((tr) => trace(ctx, tr, -s.glitch));
+  }
+  ctx.strokeStyle = GOLD.mid;
+  WALL_TRACES.forEach((tr) => trace(ctx, tr));
+  ctx.strokeStyle = 'rgba(255, 224, 138, 0.55)'; ctx.lineWidth = 0.6;
+  WALL_TRACES.forEach((tr) => trace(ctx, tr.map(([x, y]) => [x, y - 0.6])));
+  for (const tr of WALL_TRACES) {
+    for (const [x, y] of [tr[0], tr[tr.length - 1]]) {
+      ctx.beginPath(); ctx.arc(x, y, 1.9, 0, Math.PI * 2); ctx.fillStyle = GOLD.mid; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 0.8, 0, Math.PI * 2); ctx.fillStyle = '#3a0414'; ctx.fill();
+    }
+  }
+  // light running along them, a short trail behind each spark (faster and violet while she works)
+  if (t && !asleep) {
+    const fast = s.mode === 'work' ? 2.2 : 1;
+    WALL_TRACES.forEach((tr, i) => {
+      const len = along(tr);
+      const d = ((t * 38 * fast + i * 31) % (len + 50)) - 20;
+      for (let k = 0; k < 4; k++) {
+        const dd = d - k * 3;
+        if (dd < 0 || dd > len) continue;
+        const [x, y] = along(tr, dd);
+        ctx.fillStyle = k ? `rgba(255, 236, 180, ${0.55 - k * 0.13})` : s.mode === 'work' ? '#c9a8ff' : '#fff6d8';
+        ctx.fillRect(x - 1.3, y - 1.3, k ? 2 : 2.8, k ? 2 : 2.8);
+      }
+    });
+  }
+  // the surge: the board gone dark, the wall's red cracks through it, flickering
+  if (surge > 0) {
+    ctx.fillStyle = `rgba(6, 0, 3, ${0.55 * surge})`; ctx.fillRect(46, 16, 126, 36);
+    ctx.strokeStyle = `rgba(255, 40, 90, ${surge})`; ctx.lineWidth = 1.2;
+    const seed = Math.floor(t * 14);
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      let y = 20 + hash(seed, k) * 28;
+      ctx.moveTo(46, y);
+      for (let x = 52; x <= 172; x += 8) {
+        y = Math.max(18, Math.min(50, y + (hash(seed + x, k) - 0.5) * 12));
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = `rgba(255, 90, 140, ${0.5 * surge})`;
+    for (let k = 0; k < 10; k++) ctx.fillRect(48 + hash(seed, k + 9) * 118, 18 + hash(seed, k + 19) * 30, 3, 1.4);
+  }
+  glass(ctx, s, 46, 16, 126, 36);
+  ctx.restore();
+
+  // the end: a black collar with a slit of her red light, then the edge connector, gold fingers on it
+  poly(ctx, W.collar); ctx.fillStyle = '#141018'; ctx.fill();
+  ctx.fillStyle = '#2e2838'; ctx.fillRect(168, 19.5, 13, 1.4);
+  ctx.fillStyle = '#08060a'; ctx.fillRect(168, 45, 13, 4);
+  const pulse = asleep ? 0.25 : 0.55 + 0.45 * Math.abs(Math.sin(t * 2.2)) + surge * 0.4;
+  ctx.fillStyle = `rgba(255, 33, 82, ${Math.min(1, pulse)})`; ctx.fillRect(173.5, 23, 2.4, 22);
+  ctx.fillStyle = `rgba(255, 200, 215, ${Math.min(0.8, pulse * 0.6)})`; ctx.fillRect(174.2, 23, 1, 22);
+  poly(ctx, W.tongue); ctx.fillStyle = '#1c0c14'; ctx.fill();
+  ctx.save(); poly(ctx, W.tongue); ctx.clip();
+  ctx.fillStyle = '#2c1420'; ctx.fillRect(180, 23, 32, 2);
+  for (let i = 0; i < 6; i++) {
+    const x = 183 + i * 4.2;
+    if (x + 2.6 > 195 && x < 199) continue; // the key notch
+    ctx.fillStyle = s.glint === i % 5 ? COLORS.paper : GOLD.mid; ctx.fillRect(x, 25.5, 2.6, 15);
+    ctx.fillStyle = GOLD.lit; ctx.fillRect(x, 25.5, 2.6, 1.4);
+    ctx.fillStyle = GOLD.dark; ctx.fillRect(x, 39, 2.6, 1.5);
+  }
+  ctx.restore();
+
+  // the black cap: her eyes glowing out of it, gold screws, her name
+  poly(ctx, W.cap); ctx.fillStyle = '#0f0b14'; ctx.fill();
+  ctx.fillStyle = '#2a2236'; ctx.fillRect(6, 15.5, 36, 1.8);
+  poly(ctx, box(9, 19, 34, 24)); ctx.fillStyle = '#060408'; ctx.fill();
+  ctx.save(); poly(ctx, box(9, 19, 34, 24)); ctx.clip();
+  eyesOnly(ctx, s, 26, 31, 0.42);
+  ctx.restore();
+  poly(ctx, box(9, 19, 34, 24)); ctx.strokeStyle = surge > 0.3 ? COLORS.red : '#3a2c46'; ctx.lineWidth = 1.2; ctx.stroke();
+  for (const [x, y] of [[7, 17], [41, 51]]) {
+    ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fillStyle = GOLD.mid; ctx.fill();
+    ctx.fillStyle = GOLD.lit; ctx.fillRect(x - 1, y - 0.6, 2, 0.8);
+  }
+  led(ctx, s, 9, 46, 6, 3);
+  label(ctx, 'CPRN', 18, 50.5, 5, GOLD.dark);
+  outline(ctx, shapes);
+}
+
 export const DESIGNS = [
+  { id: 'wall', name: 'Blackwall circuit', draw: blackwallCircuit, face: { x: 26, y: 31 } },
   { id: 'blackout', name: 'Blackout', draw: blackout, face: { x: 27, y: 31 } },
   { id: 'hybrid', name: 'Black & silver', draw: hybrid, face: { x: 27, y: 31 } },
   { id: 'relic', name: 'Relic', draw: relic, face: { x: 27, y: 34 } },
