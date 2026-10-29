@@ -308,6 +308,8 @@ function render(f, text, length, silence, speaker) {
 // (warm), stopped with her.
 const servers = new Map(); // model file -> { url, ready: Promise<boolean>, child, gpu }
 let gpuFailed = false;
+let gpuExits = []; // when the card's server stopped by itself lately
+let stoppingEars = false;
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -334,7 +336,16 @@ function startServer(model, gpu) {
     // below normal, like the rest of her: a game first (on the card it hardly uses the processor anyway)
     try { os.setPriority(entry.child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* not yet */ }
     entry.child.stderr.on('data', (d) => { if (entry.log.length < 20000) entry.log += d; });
-    entry.child.on('exit', () => { if (servers.get(model) === entry) servers.delete(model); });
+    entry.child.on('exit', (code) => {
+      if (servers.get(model) === entry) servers.delete(model);
+      // the card's one gone (a game took the card, a driver hiccup): noted, and started again with the
+      // next clip (hear); three times in ten minutes, the processor from then on
+      if (gpu && !stoppingEars) {
+        keepNote('gpu.log', `${new Date().toISOString()} the card's Whisper stopped (exit ${code}):\n${entry.log.slice(-1500)}\n`);
+        gpuExits = gpuExits.filter((t) => Date.now() - t < 10 * 60 * 1000).concat(Date.now());
+        if (gpuExits.length >= 3) gpuFailed = true;
+      }
+    });
     entry.child.on('error', () => {});
     for (let i = 0; i < 120; i++) { // up to a minute: loading a model onto a card the first time is slow
       if (entry.child.exitCode !== null) return false;
@@ -344,6 +355,7 @@ function startServer(model, gpu) {
         // the card's first clip takes ~17 s (its code compiled for it): that one's a second of silence,
         // now, not your first "Hey Capri"
         if (gpu) await warmUp(entry.url);
+        entry.up = true;
         return true;
       }
       await new Promise((r) => setTimeout(r, 500));
@@ -410,11 +422,14 @@ function warm() {
   serverFor(gpuComplete() && !gpuFailed ? f.sharp : f.ears);
 }
 
-const gpuOn = () => [...servers.values()].some((e) => e.gpu);
+// the card's server up and ready (not still loading: a clip would wait the ~17 s of its first one)
+const gpuOn = () => [...servers.values()].some((e) => e.gpu && e.up);
 
 function stopEars() {
+  stoppingEars = true;
   for (const e of servers.values()) e.child?.kill();
   servers.clear();
+  setTimeout(() => { stoppingEars = false; }, 2000);
 }
 
 // What you said, from a 16 kHz mono WAV (a Buffer). `sharp`: what you ask her (beam search: the words
@@ -432,6 +447,10 @@ function hear(wav, sharp = false, accurate = false) {
     const file = path.join(os.tmpdir(), `capri-heard-${process.pid}-${Date.now()}.wav`);
     fs.writeFileSync(file, wav);
     const t0 = Date.now();
+    // the card's Whisper (the bigger model, ~0.4 s) should be up: if it stopped, started again for the
+    // next clip, this one on the processor meanwhile (it was left down for good before: she'd hear you
+    // with the small model only, and get more of it wrong)
+    if (!gpuOn() && !gpuFailed && gpuComplete() && !servers.has(f.sharp)) warm();
     const big = gpuOn() || (sharp && accurate);
     const model = big ? f.sharp : f.ears;
     if (big && !gpuOn()) {

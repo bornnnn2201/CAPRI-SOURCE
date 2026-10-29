@@ -470,7 +470,121 @@ public static class CapriPopups {
 "@
 }
 
+# Discord's own buttons for your voice (mute, deafen, camera, screen share, leaving the call), found
+# through UI Automation like the popups: where each one is on screen (she zaps it) and whether it's
+# on, then pressed the way a click would. Chromium only builds what UI Automation sees once something
+# asks: the first look can come back empty, so a few looks, a moment apart.
+if ($Op -eq 'discord') {
+  Add-Type -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows.Automation;
+
+public static class CapriDiscord {
+  delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+  // each button by what Discord calls it (its English labels), on or off
+  static readonly Dictionary<string, Regex> NAMES = new Dictionary<string, Regex> {
+    { "mute", new Regex(@"^(?:mute|unmute)$", RegexOptions.IgnoreCase) },
+    { "deafen", new Regex(@"^(?:deafen|undeafen)$", RegexOptions.IgnoreCase) },
+    { "camera", new Regex(@"^(?:turn (?:on|off) camera|camera|(?:start|stop) video|video)$", RegexOptions.IgnoreCase) },
+    { "screen", new Regex(@"^(?:share your screen|share screen|screen share|stop streaming|stop sharing|go live)$", RegexOptions.IgnoreCase) },
+    { "disconnect", new Regex(@"^(?:disconnect|leave call)$", RegexOptions.IgnoreCase) },
+  };
+  // what its label says when it's on (when there's no on/off state to read)
+  static readonly Regex ON_LABEL = new Regex(@"^(?:unmute|undeafen|turn off camera|stop video|stop streaming|stop sharing)$", RegexOptions.IgnoreCase);
+
+  static List<IntPtr> Windows() {
+    var pids = new HashSet<uint>();
+    foreach (var p in Process.GetProcessesByName("Discord")) pids.Add((uint)p.Id);
+    var list = new List<IntPtr>();
+    if (pids.Count == 0) return list;
+    EnumWindows((h, l) => {
+      uint pid;
+      GetWindowThreadProcessId(h, out pid);
+      if (pids.Contains(pid) && IsWindowVisible(h)) list.Add(h);
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+
+  static AutomationElement Find(string what, out string why) {
+    why = Process.GetProcessesByName("Discord").Length == 0 ? "closed" : "hidden";
+    Regex re;
+    if (!NAMES.TryGetValue(what, out re)) { why = "unknown"; return null; }
+    var button = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+    for (int tries = 0; tries < 4; tries++) {
+      int seen = 0;
+      foreach (var h in Windows()) {
+        AutomationElement root;
+        try { root = AutomationElement.FromHandle(h); } catch { continue; }
+        AutomationElementCollection all;
+        try { all = root.FindAll(TreeScope.Descendants, button); } catch { continue; }
+        seen += all.Count;
+        foreach (AutomationElement b in all) {
+          string name = (b.Current.Name ?? "").Trim();
+          if (re.IsMatch(name)) return b;
+        }
+      }
+      if (seen > 5) { why = what == "mute" || what == "deafen" ? "hidden" : "nocall"; return null; } // it looked: no such button (not in a call)
+      System.Threading.Thread.Sleep(700);
+    }
+    return null;
+  }
+
+  static bool IsOn(AutomationElement b) {
+    object pattern;
+    if (b.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) return ((TogglePattern)pattern).Current.ToggleState == ToggleState.On;
+    return ON_LABEL.IsMatch((b.Current.Name ?? "").Trim());
+  }
+
+  static string Json(string s) { return "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""; }
+
+  static string Describe(AutomationElement b) {
+    var r = b.Current.BoundingRectangle;
+    bool shown = !r.IsEmpty && r.Width > 0 && r.X > -10000;
+    return "{\"found\":true,\"name\":" + Json(b.Current.Name) + ",\"on\":" + (IsOn(b) ? "true" : "false")
+      + (shown ? ",\"rect\":{\"x\":" + (int)r.X + ",\"y\":" + (int)r.Y + ",\"w\":" + (int)r.Width + ",\"h\":" + (int)r.Height + "}" : "") + "}";
+  }
+
+  // where that button is, and whether it's on
+  public static string Look(string what) {
+    SetProcessDpiAwarenessContext(new IntPtr(-4)); // its place in real pixels, like the windows'
+    string why;
+    var b = Find(what, out why);
+    return b == null ? "{\"found\":false,\"why\":" + Json(why) + "}" : Describe(b);
+  }
+
+  // pressed, then looked at again: on or off now
+  public static string Press(string what) {
+    SetProcessDpiAwarenessContext(new IntPtr(-4));
+    string why;
+    var b = Find(what, out why);
+    if (b == null) return "{\"found\":false,\"why\":" + Json(why) + "}";
+    object pattern;
+    try {
+      if (b.TryGetCurrentPattern(InvokePattern.Pattern, out pattern)) ((InvokePattern)pattern).Invoke();
+      else if (b.TryGetCurrentPattern(TogglePattern.Pattern, out pattern)) ((TogglePattern)pattern).Toggle();
+      else return "{\"found\":true,\"pressed\":false}";
+    } catch { return "{\"found\":true,\"pressed\":false}"; }
+    System.Threading.Thread.Sleep(350);
+    var after = Find(what, out why);
+    return "{\"pressed\":true,\"after\":" + (after == null ? "null" : Describe(after)) + "}";
+  }
+}
+"@
+}
+
 $out = switch ($Op) {
+  'discord' { if ($Arg2 -eq 'press') { [CapriDiscord]::Press($Arg) } else { [CapriDiscord]::Look($Arg) } }
   'dialogs' { [CapriPopups]::List($Arg) }
   'press' { [CapriPopups]::Press($Arg, $Arg2) }
   'close' { [CapriHands]::Close($Arg) }
@@ -487,7 +601,7 @@ $out = switch ($Op) {
   'capture' {
     # NVIDIA's overlay helper running: its Instant Replay saves on Alt+F10. Windows' Game Bar: only
     # with its captures and "record what happened" switched on.
-    $dvr = Get-ItemProperty 'HKCU:SoftwareMicrosoftWindowsCurrentVersionGameDVR' -ErrorAction SilentlyContinue
+    $dvr = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\GameDVR' -ErrorAction SilentlyContinue
     $nvidia = [bool](Get-Process nvsphelper64, 'NVIDIA Share' -ErrorAction SilentlyContinue)
     $gamebar = $dvr.AppCaptureEnabled -eq 1 -and $dvr.HistoricalCaptureEnabled -eq 1
     '{"nvidia":' + "$nvidia".ToLower() + ',"gamebar":' + "$gamebar".ToLower() + '}'

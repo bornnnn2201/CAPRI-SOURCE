@@ -1,6 +1,6 @@
 # Watches the top-level windows so Capri can sit on them.
 # Prints one JSON line whenever something changes: the foreground window and the visible
-# windows in z-order (front first), as physical-pixel frame bounds. No contents, and no titles:
+# windows in z-order (front first), as physical-pixel frame bounds, each with its program ("discord"). No contents, and no titles:
 # the title of the window in front is only checked against a short list of AI names (ChatGPT,
 # Gemini...) for her jealousy, and all that goes out is which of them matched ("ai").
 #
@@ -87,6 +87,26 @@ public static class CapriWindows {
       if (m.Success && !NOT_GAME.IsMatch(m.Groups[1].Value)) game = m.Groups[1].Value;
     }
     CloseHandle(h);
+  }
+
+  // The program a window belongs to ("discord", "chrome"), by its process: looked up once per process.
+  static Dictionary<uint, string> apps = new Dictionary<uint, string>();
+  static string AppOf(IntPtr hwnd) {
+    uint pid;
+    GetWindowThreadProcessId(hwnd, out pid);
+    string name;
+    if (apps.TryGetValue(pid, out name)) return name;
+    if (apps.Count > 300) apps.Clear();
+    name = "";
+    IntPtr h = OpenProcess(0x1000, false, pid); // PROCESS_QUERY_LIMITED_INFORMATION
+    if (h != IntPtr.Zero) {
+      var path = new StringBuilder(1024);
+      int size = path.Capacity;
+      if (QueryFullProcessImageName(h, 0, path, ref size)) name = System.IO.Path.GetFileNameWithoutExtension(path.ToString()).ToLowerInvariant();
+      CloseHandle(h);
+    }
+    apps[pid] = name;
+    return name;
   }
 
   static string Json(string s) {
@@ -428,7 +448,8 @@ public static class CapriWindows {
       sb.Append("{\"id\":").Append(h.ToInt64())
         .Append(",\"x\":").Append(r.Left).Append(",\"y\":").Append(r.Top)
         .Append(",\"w\":").Append(r.Right - r.Left).Append(",\"h\":").Append(r.Bottom - r.Top)
-        .Append(",\"max\":").Append(IsZoomed(h) ? "true" : "false").Append('}');
+        .Append(",\"max\":").Append(IsZoomed(h) ? "true" : "false")
+        .Append(",\"app\":").Append(Json(AppOf(h))).Append('}');
       return true;
     }, IntPtr.Zero);
     sb.Append("]}");

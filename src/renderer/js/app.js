@@ -250,6 +250,11 @@ async function boot() {
     voice.play('bye');
     capri.stow();
   };
+  // "come out", "wake up": out of her biochip as when you click it, or up from her mask
+  chat.onOut = () => {
+    if (capri.dormant) capri.wake();
+    else comeOut();
+  };
   chat.onBetterModel = () => setup.better();
   setup.onReady = () => chat.start();
   // What she calls you, how she is, your lines, what she remembers (custom.js)

@@ -3,6 +3,7 @@
 // like a construct coming off a chip: close to her, a copy of nobody.
 
 import { pick } from './util.js';
+import { heardAs } from './hearing.js';
 
 const PITCH = 1.2;          // as in main/speech.js (each voice can have its own: it comes with her line)
 const PRE_ROLL_MS = 300;    // kept from before you start talking, so the first word isn't clipped
@@ -606,6 +607,7 @@ export class Speech {
       }
     }
     if (request) {
+      request = heardAs(request); // "Got rest." was "go rest", "Use red ticks." "Reboot Optics"
       this.awakeUntil = 0;
       clearTimeout(this.endTimer); // the conversation goes on: after her answer she listens again
       // whoever said the request: what they may ask is theirs (app.js); her answer done, followUp
@@ -633,6 +635,8 @@ function afterName(text) {
 // greeting (two pieces joined too: "Ca pri"), or run into the greeting in one word ("Hackapri").
 export function findName(text) {
   const tokens = [...String(text || '').matchAll(/[a-z']+/gi)].map((m) => ({ w: m[0].toLowerCase().replace(/'s$/, ''), end: m.index + m[0].length }));
+  // "Hike prey", "Like pray": the "Ca" swallowed by a quick "hey", the rest heard as a word of its own
+  if (tokens[1] && /^(?:hike|hyke|like|hey|hay|hi|hike's|a)$/.test(tokens[0].w) && /^[ck]?a?pr(?:i|ee|ey|ay|ie|y|e)$/.test(tokens[1].w)) return tokens[1].end;
   for (let i = 0; i < tokens.length; i++) {
     if (i === 0 && greetedName(tokens[i].w)) return tokens[i].end;
     if (i > 0 && !GREETINGS.has(tokens[i - 1].w)) continue;
@@ -720,12 +724,19 @@ export function forSpeech(text) {
   return s;
 }
 
-// Whisper's notes about the sound ("[BLANK_AUDIO]", "(music)", "*laughs*") aren't words.
-function cleanHeard(text) {
-  return String(text || '')
+// Whisper's notes about the sound ("[BLANK_AUDIO]", "(music)", "*laughs*") aren't words, nor are a
+// clip's worth of quote marks. It also writes one voice as two now and then ("- Who are you? - Who
+// are you?"): said once.
+export function cleanHeard(text) {
+  let t = String(text || '')
     .replace(/\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  const same = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const turns = t.split(/(?:^|\s)-\s+/).map((s) => s.trim()).filter(Boolean);
+  if (turns.length > 1 && turns.every((s) => same(s) === same(turns[0]))) t = turns[0];
+  else t = t.replace(/^-\s+/, '');
+  return /[a-z0-9]/i.test(t) ? t : '';
 }
 
 // The chunks, joined, brought down to 16 kHz mono (what Whisper wants) and wrapped as a WAV.

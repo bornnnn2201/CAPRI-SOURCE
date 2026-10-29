@@ -30,7 +30,7 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
 
   const toOverlay = (win, bounds) => {
     const dip = screen.screenToDipRect(null, { x: win.x, y: win.y, width: win.w, height: win.h });
-    return { id: win.id, x: dip.x - bounds.x, y: dip.y - bounds.y, w: dip.width, h: dip.height, max: win.max };
+    return { id: win.id, x: dip.x - bounds.x, y: dip.y - bounds.y, w: dip.width, h: dip.height, max: win.max, app: win.app || '' };
   };
 
   // Her window where it belongs. While she rides a window you drag, the helper moves her whole

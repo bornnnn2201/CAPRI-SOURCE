@@ -4,7 +4,8 @@
 // bring it up), the window you're in ("close this", "close this tab"), the volume to an exact level,
 // the desktop, locking, sleep, the screens off, shutting down (with a minute to take it back),
 // Windows' settings pages and tools, how busy the PC is, one app's own volume ("turn Discord down"),
-// and "clip that" (the recorder's save shortcut). control.ps1 does the Win32 calls.
+// and "clip that" (the recorder's save shortcut), and Discord's voice buttons (mute, deafen, camera,
+// screen share, leaving the call). control.ps1 does the Win32 calls.
 
 const os = require('node:os');
 const path = require('node:path');
@@ -127,6 +128,11 @@ async function control({ op, target, value } = {}) {
       return { ok: true };
     }
     case 'stats': return stats();
+    // Discord's voice buttons (mute, deafen, camera, screen, disconnect): `value.press` presses it, else
+    // where it is on screen ({ rect }, real pixels) and whether it's on
+    case 'discord':
+      if (!value?.button) return { error: 'no button' };
+      return run('discord', value.button, value.press ? 'press' : 'look');
     default: return { error: 'unknown' };
   }
 }

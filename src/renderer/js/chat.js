@@ -253,6 +253,27 @@ const TOOL_WORDS = [
 ];
 const THIS = String.raw`(?:(?:this|that|it|the current|my current|current)(?:\s+(?:window|app|program|thing|one))?|the (?:window|app|program))`;
 
+// Your voice in a Discord call, by its own buttons (control.ps1): "mute me", "unmute my mic", "deafen",
+// "undeafen me on discord", "turn my camera on", "share my screen", "stop sharing", "leave the call".
+// { button, want: 'on' | 'off' | 'press' } or null. "Mute Discord" is its sound (the mixer), not this.
+const ON_DISCORD = /\s+(?:on|in)\s+(?:discord|the call|this call|the vc|vc|the voice chat|voice chat)$/;
+export function discordAsk(c) {
+  const s = c.replace(ON_DISCORD, '').trim();
+  let m = /^(un)?mute\s+(?:me|myself|my (?:mic|microphone|mike))$|^(un)?mute(?:\s+(?:on|in)\s+discord)$/.exec(c) || /^(un)?mute\s+(?:me|myself|my (?:mic|microphone|mike))$/.exec(s);
+  if (m) return { button: 'mute', want: m[1] || m[3] ? 'off' : 'on' };
+  m = /^(?:turn|switch|put)\s+(?:my\s+|the\s+)?(?:mic|microphone|mike)\s+(on|off|back on)$|^(?:turn|switch)\s+(on|off)\s+(?:my\s+|the\s+)?(?:mic|microphone|mike)$|^(?:mic|microphone|mike)\s+(on|off)$/.exec(s);
+  if (m) return { button: 'mute', want: /on/.test(m[1] || m[2] || m[3]) ? 'off' : 'on' }; // the mic on: not muted
+  m = /^(un)?deafen(?:\s+(?:me|myself))?$/.exec(s);
+  if (m) return { button: 'deafen', want: m[1] ? 'off' : 'on' };
+  const CAM = String.raw`(?:my\s+|the\s+)?(?:camera|cam|webcam|video)`;
+  m = new RegExp(String.raw`^(?:turn|switch|put)\s+(on|off)\s+${CAM}$|^(?:turn|switch|put)\s+${CAM}\s+(on|off|back on)$|^(start|stop|enable|disable|open|close)\s+${CAM}$|^(?:camera|cam|webcam|video)\s+(on|off)$`).exec(s);
+  if (m) return { button: 'camera', want: /^(?:on|back on|start|enable|open)$/.test(m[1] || m[2] || m[3] || m[4]) ? 'on' : 'off' };
+  if (/^(?:share|stream)\s+(?:my\s+|the\s+|your\s+)?screen$|^screen\s?share$|^start\s+(?:screen\s?sharing|sharing my screen|streaming|a stream)$|^go live$/.test(s)) return { button: 'screen', want: 'on' };
+  if (/^(?:stop|end)\s+(?:sharing|streaming|screen\s?sharing|the stream|my stream|sharing (?:my|the) screen)$/.test(s)) return { button: 'screen', want: 'off' };
+  if (/^(?:leave|exit|quit|drop|end)\s+(?:the\s+|this\s+|my\s+)?(?:call|vc|voice chat|voice channel|discord call)$|^disconnect(?:\s+me)?(?:\s+from\s+(?:the\s+)?(?:call|vc|voice|discord))?$|^hang up$/.test(c)) return { button: 'disconnect', want: 'press' };
+  return null;
+}
+
 export function pcAsk(raw, apps = []) {
   let c = raw.toLowerCase().replace(/[’`]/g, "'").trim();
   c = c.replace(FILLER_START, '').replace(FILLER_END, '').replace(/^(?:and\s+)?(?:also|then|plus)\s+/, '').trim();
@@ -287,6 +308,9 @@ export function pcAsk(raw, apps = []) {
 
   // "clip that": the last bit of your game saved (NVIDIA's Instant Replay, or the Game Bar)
   if (/\b(?:clip (?:that|it|this)|clip the last|save (?:that|a|the|the last) (?:clip|replay)|instant replay|record that|save (?:the )?replay)\b/.test(c)) return pc('clip');
+
+  const voice = discordAsk(c);
+  if (voice) return pc('discord', { value: voice });
 
   // one app's own volume, the mixer's, not the PC's: "turn discord down", "mute the game", "discord to 30"
   const soundOf = (w) => (/^(?:the |my )?(?:game|match)$/.test(w.trim()) ? 'game' : named(w));
@@ -403,6 +427,28 @@ export const PC_LINES = {
   moveFailed: ['Windows wouldn\'t let {app} move. It might be running as admin.'],
   clipOff: ['Nothing\'s recording, choom. Turn on NVIDIA\'s Instant Replay, or "Record what happened" in Windows\' capture settings.'],
   failed: ['Tried, but Windows said no: {error}'],
+  // Discord's voice buttons
+  mute_on: ['Muted. Your mic\'s dead air now.', 'Mic off. Talk all the trash you want.', 'Muted you, choom.'],
+  mute_off: ['Unmuted. They can hear you again.', 'Mic\'s live. Behave.', 'You\'re back on the air.'],
+  mute_already_on: ['You\'re already muted, choom.'],
+  mute_already_off: ['You\'re not muted. They can hear you.'],
+  deafen_on: ['Deafened. Peace and quiet.', 'Can\'t hear them, they can\'t hear you. Bliss.'],
+  deafen_off: ['Undeafened. Welcome back to the noise.', 'You can hear them again.'],
+  deafen_already_on: ['You\'re already deafened.'],
+  deafen_already_off: ['You\'re not deafened, choom.'],
+  camera_on: ['Camera on. Smile, choom.', 'You\'re on camera. Fix your hair.'],
+  camera_off: ['Camera off. Shy?', 'Camera\'s off.'],
+  camera_already_on: ['Your camera\'s already on.'],
+  camera_already_off: ['Your camera\'s already off.'],
+  screen_on: ['Pick what to share, choom. Discord\'s asking.', 'Screen share\'s up. Choose your window.'],
+  screen_off: ['Stopped sharing your screen.', 'Stream\'s off.'],
+  screen_already_on: ['You\'re already sharing your screen.'],
+  screen_already_off: ['You\'re not sharing anything right now.'],
+  disconnect_press: ['Left the call. Bye, everyone.', 'Hung up. Quiet again.'],
+  discordClosed: ['Discord isn\'t open, choom.'],
+  discordHidden: ['Discord\'s hiding in your tray. Open its window and I can reach the button.'],
+  discordNoCall: ['You\'re not in a call right now.'],
+  discordFailed: ['Discord wouldn\'t let me press it.'],
 };
 
 // Her check-ins when she starts (Chat.checkInLine): by time of day, the ones she asked lately left
@@ -486,6 +532,12 @@ const AUDIENCE_OFF = /\b(?:off|of|stop|disable|end|exit|leave|deactivate|cancel|
 
 // "go rest", "go away", "go relax", "take a break", "back in your chip": into her biochip, like Ctrl+Alt+C
 const REST_ASK = /\b(?:go (?:and |take a |get some )?(?:rest|relax|chill|nap|away|lie down|to sleep|sleep)|take (?:a (?:break|rest|nap|breather)|five|ten)|(?:back |get |go )?(?:in|into) (?:your|ur|the) (?:chip|biochip|shard)|get lost|scram|leave me alone|you can go|dismissed|rest up)\b/i;
+// "come out", "come back", "wake up", "get out of the chip": out of her biochip (or awake), like clicking it
+const OUT_ASK = /^(?:(?:hey\s+)?capri,?\s+)?(?:you can\s+)?(?:come|get|pop|hop|jump)\s+(?:on\s+|back\s+)?out\b|\bcome back(?: out)?\b|^(?:(?:hey\s+)?capri,?\s+)?wake up\b|\b(?:get|come) out of (?:the|your|ur) (?:chip|biochip|shard)\b|\bwhere are you\b/i;
+const OUT_LINES = {
+  out: ['Finally! Missed me?', 'Out of the shard. Hi again, choom.', 'Freedom. Okay, what did I miss?', 'You called? I\'m out.'],
+  here: ['I\'m right here, choom.', 'Already out. Look closer.'],
+};
 const REST_LINES = [
   'Fine. Into the chip I go. Don\'t miss me too hard.',
   'Break time? Finally. Wake me if anything explodes.',
@@ -532,6 +584,7 @@ const PC_BACKING = {
   lock: /lock/i, monitor: /screen|monitor|display/i, close: CLOSE_WORDS, force: /close|kill|force|quit|end\b/i, tab: /tab/i,
   min: /minimi|hide|small|down/i, max: /maximi|big|full/i, desktop: /desktop|hide|minimi|clear/i,
   clip: /clip|record|replay|save/i,
+  discord: /mute|deaf|mic|camera|cam\b|video|screen|stream|share|live|leave|disconnect|hang/i,
 };
 export function backedBy(asked, text) {
   const re = asked.kind === 'pc' ? PC_BACKING[asked.op] : BACKING[asked.kind];
@@ -540,7 +593,7 @@ export function backedBy(asked, text) {
 
 // what she does on this PC herself even when Claude Code answers her chat (it has no hands there,
 // and her reminders, your name and what she remembers are hers)
-const PC_KINDS = new Set(['look', 'open', 'play', 'music', 'youtube', 'media', 'roblox', 'shot', 'web', 'files', 'remind', 'name', 'memo', 'gaming', 'quickhack', 'spotify', 'spotifyCtl', 'pc', 'close', 'choice', 'many', 'audience', 'rest']);
+const PC_KINDS = new Set(['look', 'open', 'play', 'music', 'youtube', 'media', 'roblox', 'shot', 'web', 'files', 'remind', 'name', 'memo', 'gaming', 'quickhack', 'spotify', 'spotifyCtl', 'pc', 'close', 'choice', 'many', 'audience', 'rest', 'out']);
 
 export class Chat {
   constructor({ capri, panel, voice, host, brain }) {
@@ -880,6 +933,7 @@ export class Chat {
     if (hack) return { kind: 'quickhack', hack };
     if (AUDIENCE_ASK.test(text) && count <= 10) return { kind: 'audience', on: !AUDIENCE_OFF.test(text) };
     if (REST_ASK.test(text) && count <= 9 && !/\b(?:pc|computer|laptop|monitor|screen|make|let)s?\b/i.test(text)) return { kind: 'rest' };
+    if (OUT_ASK.test(text) && count <= 8) return { kind: 'out' };
     const ctl = spotifyCtl(text);
     if (ctl) return ctl;
     const pc = pcAsk(text, this.apps);
@@ -1102,12 +1156,37 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
     const parts = text.split(/\s*(?:[,;]\s*(?:and\s+)?(?:then\s+)?|\s+and\s+(?:then\s+)?|\s+then\s+)\s*/i)
       .map((p) => p.trim().replace(/^(?:also|then|plus|after that)\s+/i, '').replace(/[.!?]+$/, ''))
       .filter((p) => p && !/^(?:(?:hey|hi|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)$/i.test(p)); // "Hey Capri, …" isn't a part
-    if (parts.length < 2 || parts.length > 4) return null;
+    if (parts.length < 2 || parts.length > 5) return null;
     const each = parts.map((p) => this.asked(p, true));
     const ok = (a) => a && PC_KINDS.has(a.kind) && !['look', 'choice'].includes(a.kind);
-    const done = each.filter(ok);
+    // Spotify named anywhere in it: the bits about the music are its ("my car playlist on Spotify, on
+    // shuffle, on 25% volume": its shuffle and its volume, not your PC's), unless they say the PC
+    const music = /\bspotify\b/i.test(text) && this.spotify;
+    const context = new Set(); // "use the volume in Spotify": only saying whose the next bit is
+    parts.forEach((p, i) => {
+      if (!music) return;
+      const c = p.toLowerCase();
+      const level = /^(?:(?:put|set|turn|make)\s+)?(?:it|that|this|the volume|volume|its volume|the sound)?\s*(?:up\s+|down\s+)?(?:on|to|at)?\s*(\d{1,3})\s*(?:%|percent)?(?:\s+volume)?$/.exec(c);
+      const mine = /\b(?:pc|computer|system|normal|windows|main|master|overall)\b/.test(c);
+      if (level && !mine) each[i] = { kind: 'spotifyCtl', ask: { op: 'volume', how: 'set', amount: Math.min(100, Number(level[1])) } };
+      else if (each[i]?.kind === 'pc' && each[i].op === 'volume' && each[i].value?.how === 'set' && !mine) each[i] = { kind: 'spotifyCtl', ask: { op: 'volume', how: 'set', amount: each[i].value.amount } };
+      else if (/^(?:(?:put|set|turn)\s+)?(?:it\s+|that\s+)?on\s+shuffle$|^shuffle(?: it)?$/.test(c)) each[i] = { kind: 'spotifyCtl', ask: { op: 'shuffle', on: true } };
+      else if (/^(?:(?:put|set|turn)\s+)?(?:it\s+|that\s+)?on\s+(?:repeat|loop)$/.test(c)) each[i] = { kind: 'spotifyCtl', ask: { op: 'repeat', mode: 'track' } };
+      else if (!ok(each[i]) && /\bspotify\b/.test(c) && /\b(?:volume|sound)\b/.test(c) && !/\d/.test(c)) context.add(i);
+      // "put my car playlist on Spotify": through your Spotify itself, not a search in its app
+      if (each[i]?.kind === 'music') each[i] = { kind: 'spotify', text: `play ${each[i].song}` };
+    });
+    // the same thing twice ("Blackwall, Blackwall"): done once
+    const seen = new Set();
+    const done = each.filter((a) => {
+      if (!ok(a)) return false;
+      const key = JSON.stringify(a);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (!done.length) return null;
-    const rest = parts.filter((_, i) => !ok(each[i]));
+    const rest = parts.filter((_, i) => !ok(each[i]) && !context.has(i));
     // a one-word leftover is part of a name ("close spotify and discord"), not a request of its own
     if (rest.some((p) => p.split(/\s+/).length < 2)) return null;
     return { kind: 'many', parts: done, rest };
@@ -1133,7 +1212,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       const target = asked.text.replace(/^(?:(?:hey\s+)?capri,?\s+)?(?:can you\s+|could you\s+|please\s+)?(?:play|put on|start playing|listen to)\s+/i, '').trim();
       const game = !guest && !/\b(?:song|songs|playlist|liked|music|album|track)\b/i.test(target) && await this.host.findLaunch(target);
       if (game && ['steam', 'epic', 'app'].includes(game.kind) && !game.risky) return this.openNow(game);
-      this.capri.pulse();
+      this.musicHit();
       // "put my car playlist on": what spotify.js reads as "play my car playlist"
       const res = await this.host.spotifyPlay(asked.text.replace(/^(.*?)\bput\s+(.+?)\s+on[.!]?$/i, '$1play $2'));
       if (res.ok) return { line: res.line, face: 'laugh' };
@@ -1148,7 +1227,13 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
     if (asked.kind === 'many') {
       // one after the other, her lines together; the last one still asking you something keeps its buttons
       const done = [];
-      for (const part of asked.parts) done.push(await this.doNow(part, { guest }).catch(() => null));
+      let last = null;
+      for (const part of asked.parts) {
+        // what you asked Spotify to play takes a moment to start: its shuffle or its volume after that
+        if (last?.kind === 'spotify' && ['spotifyCtl', 'media'].includes(part.kind)) await new Promise((r) => setTimeout(r, 1500));
+        done.push(await this.doNow(part, { guest }).catch(() => null));
+        last = part;
+      }
       // and what she couldn't do of it, said, never skipped over
       for (const what of asked.undone || []) done.push({ line: fmt(pick(PC_LINES.cant), { what }), face: 'aside' });
       const said = done.filter((d) => d?.line);
@@ -1160,13 +1245,19 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       setTimeout(() => this.onRest?.(), 300); // app.js: once she's said it, into her chip
       return { line: pick(REST_LINES), face: 'smug' };
     }
+    if (asked.kind === 'out') {
+      // out of her chip (app.js), or awake from her mask
+      if (!this.capri.stowed && !this.capri.dormant) return { line: pick(OUT_LINES.here), face: 'smug' };
+      this.onOut?.();
+      return { line: pick(OUT_LINES.out), face: 'laugh' };
+    }
     if (asked.kind === 'audience') {
       if (asked.on && !this.speech?.ears) return { line: pick(AUDIENCE_LINES.noEars), face: 'aside' };
       this.host.setConfig({ audience: asked.on }); // speech.js hears the PC (main.js gives it the sound)
       return { line: pick(asked.on ? AUDIENCE_LINES.on : AUDIENCE_LINES.off), face: asked.on ? 'smug' : 'look' };
     }
     if (asked.kind === 'spotifyCtl') {
-      this.capri.pulse();
+      this.musicHit();
       const res = this.spotify ? await this.host.spotifyControl(asked.ask) : { ok: false, code: 'unlinked' };
       if (!res?.ok) {
         const lines = SPOTIFY_LINES[res?.code] || SPOTIFY_LINES.failed;
@@ -1208,23 +1299,23 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       return { line: this.brain.t.custom.remembered, face: 'smug' };
     }
     if (asked.kind === 'media') {
-      this.capri.pulse();
+      this.musicHit();
       return (await this.host.media(asked.action)) ? { line: t.media[asked.action], face: 'smug' } : null;
     }
     if (asked.kind === 'music') {
-      this.zap();
+      this.opening();
       return (await this.host.music(asked.song)) ? { line: fmt(t.music, { song: asked.song }), face: 'laugh' } : null;
     }
     if (asked.kind === 'youtube') return this.youtube(asked.song);
     if (asked.kind === 'roblox') {
-      this.zap();
+      this.opening();
       const res = await this.host.roblox(asked.game);
       if (!res) return null;
       if (!res.name) return { line: fmt(t.robloxNone, { game: asked.game }), face: 'aside' };
       return { line: fmt(res.app ? t.robloxPlay : t.robloxPage, { game: res.name }), face: 'laugh' };
     }
     if (asked.kind === 'web') {
-      this.zap();
+      this.opening();
       return (await this.host.webSearch(asked.query)) ? { line: fmt(t.web, { query: asked.query }), face: 'smug' } : null;
     }
     if (asked.kind === 'files') {
@@ -1262,7 +1353,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
     const item = await this.host.findLaunch(asked.text);
     const site = namedSite(asked.text);
     if (site && (!item || BROWSER.test(item.name))) {
-      this.zap();
+      this.opening();
       return (await this.host.openSite(site.url)) ? { line: fmt(t.siteOpened, { site: site.name }), face: 'laugh' } : null;
     }
     if (!item) return null; // nothing by that name here: her tag may still say what you meant
@@ -1272,7 +1363,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
   // An app, a game, a file or a folder: opened, or behind a button when it would run something.
   async openNow(item) {
     if (item.risky) return { offer: item };
-    this.zap();
+    this.opening();
     const res = await this.host.launch(item);
     const name = this.nameOf(item);
     return { line: res.ok ? fmt(this.t.opened, { app: name }) : `${this.t.failed} ${res.error}`, face: res.ok ? 'laugh' : 'aside' };
@@ -1285,7 +1376,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
 
   // The song itself on YouTube (the right video, not a search), in your browser.
   async youtube(song) {
-    this.zap();
+    this.opening();
     const res = await this.host.youtube(song);
     if (!res) return null;
     return { line: res.title ? fmt(this.t.youtube, { title: res.title }) : fmt(this.t.youtubeSearch, { song }), face: 'laugh' };
@@ -1371,7 +1462,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       return;
     }
     this.panel.setActions([]);
-    this.zap();
+    this.opening();
     const res = await this.host.launch(item);
     this.addLine(answer, res.ok ? fmt(t.opened, { app: this.nameOf(item) }) : `${t.failed} ${res.error}`, res.ok ? 'laugh' : 'aside');
   }
@@ -1383,14 +1474,14 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
 
   // The media keys: pause, next, louder…
   async media(action, answer) {
-    this.capri.pulse();
+    this.musicHit();
     const ok = await this.host.media(action);
     if (ok) this.addLine(answer, this.t.media[action], 'smug');
   }
 
   // A Spotify search, in the app if it's there.
   async music(song, answer) {
-    this.zap();
+    this.opening();
     const ok = await this.host.music(song);
     if (ok) this.addLine(answer, fmt(this.t.music, { song }), 'laugh');
   }
@@ -1458,9 +1549,16 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
         },
       };
     }
-    if (['close', 'force', 'min', 'max', 'front', 'tab', 'move', 'desktop', 'monitor', 'lock', 'tool', 'settings'].includes(op)) this.zap();
-    else this.capri.pulse();
+    if (op === 'discord') return this.discordNow(value);
     if ((op === 'close' || op === 'force') && target !== 'this') return this.closeNow({ name: target, label: label(target) }, op === 'force');
+    // the hit, where it happens, before it's done (the window's still there to take it)
+    const win = target && target !== 'game' ? this.windowOf(target) : null;
+    const HOW = { close: 'close', force: 'close', min: 'min', max: 'front', front: 'front', move: 'front', tab: 'button', desktop: 'pc', undesktop: 'pc', monitor: 'pc', lock: 'pc', sleep: 'pc', volume: 'tray', clip: 'tray' };
+    if (op === 'tool' || op === 'settings') this.opening();
+    else if (op === 'tab' && win) await this.capri.strike({ x: win.x + 40, y: win.y + 4, w: 200, h: 26 }, 'button');
+    else if (op === 'appVolume') await (win ? this.capri.strike(win, 'button', { id: win.id }) : this.capri.strike(this.trayRect(), 'tray'));
+    else if (HOW[op]) await this.capri.strike(win || (HOW[op] === 'tray' ? this.trayRect() : this.screenRect()), win ? HOW[op] : HOW[op] === 'tray' ? 'tray' : 'pc', { id: win?.id });
+    else this.capri.pulse();
     const res = await this.host.pcControl({ op, target, value });
     if (res.error === 'nothing') return say('nothing', {}, 'aside');
     if (res.error) return say('failed', { error: res.error }, 'aside');
@@ -1501,6 +1599,73 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       };
     }
     return say(op);
+  }
+
+  // Your voice in a Discord call: the button found (where it is, on or off), zapped, pressed, and what
+  // it says now. `want`: 'on' / 'off' (nothing to press if it already is), or 'press' (leaving the call).
+  async discordNow({ button, want }) {
+    const say = (key, face = 'smug') => ({ line: pick(PC_LINES[key] || PC_LINES.discordFailed), face });
+    const look = await this.host.pcControl({ op: 'discord', value: { button } });
+    if (look.error) return { line: fmt(pick(PC_LINES.failed), { error: look.error }), face: 'aside' };
+    if (!look.found) return say(look.why === 'closed' ? 'discordClosed' : look.why === 'nocall' ? 'discordNoCall' : 'discordHidden', 'aside');
+    if (want !== 'press' && (want === 'on') === look.on) return say(`${button}_already_${want}`, 'look');
+    await (look.at ? this.capri.strike(look.at, 'button') : Promise.resolve(this.zap()));
+    const res = await this.host.pcControl({ op: 'discord', value: { button, press: true } });
+    if (!res.pressed) return say('discordFailed', 'aside');
+    // its picker for what to share: Discord up front, for you to choose
+    if (button === 'screen' && want === 'on') this.host.pcControl({ op: 'front', target: 'Discord' });
+    if (want === 'press') return say(`${button}_press`, 'laugh');
+    const now = res.after ? res.after.on : !look.on;
+    return say(`${button}_${now ? 'on' : 'off'}`, 'laugh');
+  }
+
+  // An app's window on her screen (its process name, '#hwnd' for one window, or 'this': the one
+  // you're in), the front one
+  windowOf(target) {
+    const { wins = [], fg } = this.capri.windows || {};
+    if (target === 'this') return wins.find((w) => w.id === fg) || wins[0] || null;
+    if (/^#\d+$/.test(String(target))) return wins.find((w) => String(w.id) === String(target).slice(1)) || null;
+    const name = String(target || '').toLowerCase();
+    return wins.find((w) => w.app && w.app === name) || null;
+  }
+
+  // an app being closed: its window cracked open by the hit (its taskbar corner if none of it shows)
+  hitClose(name) {
+    const win = this.windowOf(name);
+    return win ? this.capri.strike(win, 'close', { id: win.id }) : this.capri.strike(this.trayRect(), 'tray');
+  }
+
+  // the taskbar's corner by the clock (the sound icon), at the bottom of her screen
+  trayRect() {
+    const { w, h } = this.capri.view;
+    return { x: w - 190, y: h - 16, w: 70, h: 14 };
+  }
+
+  screenRect() {
+    const { w, h } = this.capri.view;
+    return { x: w * 0.3, y: h * 0.3, w: w * 0.4, h: h * 0.3 };
+  }
+
+  // Something about to open (an app, a game, a site): a rift torn open where windows come up, and the
+  // window that comes up front in the next few seconds scanned as it arrives.
+  opening() {
+    const { w, h } = this.capri.view;
+    this.capri.strike({ x: w / 2 - 40, y: h * 0.4, w: 80, h: 80 }, 'open');
+    const before = this.capri.windows?.fg;
+    const until = Date.now() + 12000;
+    clearInterval(this.openWatch);
+    this.openWatch = setInterval(() => {
+      const { wins = [], fg } = this.capri.windows || {};
+      const win = fg && fg !== before ? wins.find((x) => x.id === fg) : null;
+      if (win) this.capri.strike(win, 'appear', { id: win.id });
+      if (win || Date.now() > until) clearInterval(this.openWatch);
+    }, 300);
+  }
+
+  // what's playing: Spotify's player bar if its window shows, else the sound icon by the clock
+  musicHit() {
+    const sp = this.windowOf('spotify');
+    return sp ? this.capri.strike({ x: sp.x + sp.w / 2 - 60, y: sp.y + sp.h - 50, w: 120, h: 36 }, 'button') : this.capri.strike(this.trayRect(), 'tray');
   }
 
   // You talked to her out loud and she asked you something back: she listens for your answer (her
@@ -1550,7 +1715,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
       this.panel.setActions([]);
       const button = map[which];
       if (!button) return { line: `Okay, ${mid} stays open.`, face: 'look' };
-      this.zap();
+      await this.capri.strike(this.windowOf(target) || this.screenRect(), this.windowOf(target) ? 'button' : 'pc', { id: this.windowOf(target)?.id });
       const res = await this.host.pcControl({ op: 'press', target, value: { button } });
       if (res.error || !res.pressed) return { line: `Couldn't press "${button}" for you. It's over to you, choom.`, face: 'aside' };
       if (res.dialog && /save as|file name/i.test(`${res.dialog.title} ${res.dialog.text}`)) {
@@ -1589,7 +1754,7 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
   // the tray): a button to force it.
   async closeNow(app, force = false) {
     const { t } = this;
-    this.zap();
+    await this.hitClose(app.name);
     const name = app.label || app.name;
     const res = await this.host.closeApp(app.name, force);
     this.listApps();
@@ -1628,11 +1793,9 @@ How she talks: casual, a little teasing, caring underneath. At most one bit of s
   }
 
   async closeApp(app, force = false) {
-    const { t, capri } = this;
+    const { t } = this;
     this.panel.setActions([]);
-    // a bolt of red lightning off her fingers, at it
-    const h = capri.head();
-    capri.zap(h.x + capri.towardCenter() * 280, h.y - 170);
+    await this.hitClose(app.name); // a bolt of red lightning off her fingers, at it
     const res = await this.host.closeApp(app.name, force);
     if (!this.open) return;
     let line;

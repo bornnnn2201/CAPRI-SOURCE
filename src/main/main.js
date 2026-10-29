@@ -1159,8 +1159,18 @@ function registerIpc() {
       if (!id) return { error: 'nothing' };
       target = `#${id}`;
     }
+    // a button on screen (Discord's): where it is in her window's terms too (`at`), for her to zap it
+    const inOverlay = (r) => {
+      if (!r || !overlay || overlay.isDestroyed()) return null;
+      const dip = screen.screenToDipRect(null, { x: r.x, y: r.y, width: r.w, height: r.h });
+      const o = windowWatch?.home() ?? overlay.getBounds();
+      return { x: dip.x - o.x, y: dip.y - o.y, w: dip.width, h: dip.height };
+    };
     // `target` back too: "this" as the window it was, for answering its popup after
-    return control({ ...ask, target }).then((res) => ({ ...res, target }), (err) => ({ error: err.message }));
+    return control({ ...ask, target }).then((res) => {
+      const rect = res.rect || res.after?.rect;
+      return { ...res, target, ...(rect ? { at: inOverlay(rect) } : {}) };
+    }, (err) => ({ error: err.message }));
   });
   // opening things you ask her to (launch.js): an app or a game, your music, a website
   ipcMain.handle('apps:findLaunch', async (_e, text) => {

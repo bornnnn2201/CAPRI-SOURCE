@@ -966,8 +966,72 @@ export class Capri {
   }
 
   // The menace: a jolt of red lightning at your pointer, and a grin.
+  // What she does on your PC, shown where it happens: a bolt of red lightning at the thing itself (the
+  // window, the button, the tray), off her hand, or out of her biochip when she's put away, and what
+  // the hit does to it once it lands. `rect`: the thing on screen; `how`:
+  //   close   the window cracks and shakes            min    knocked down, slices fly off it
+  //   front   a scanline sweeps it                    open   a rift tears open where it'll come up
+  //   appear  it's scanned as it arrives               button a hit ring and sparks on the button
+  //   tray    sparks on the taskbar by the clock       pc     a shockwave across the whole screen
+  // `id`: the window's, to draw only on what of it shows. Resolves once it's landed.
+  async strike(rect, how = 'button', { id = null } = {}) {
+    if (!rect || reducedMotion.matches || this.dormant) return false;
+    const fx = this.fx;
+    const s = this.scale;
+    const live = () => (id ? this.windows.wins.find((w) => w.id === id) || null : rect);
+    const covers = () => (id ? this.coversOf(id) : []);
+    const at = how === 'tray' || how === 'button' || !id
+      ? { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
+      : { x: clamp(rect.x + rect.w / 2, 30, this.view.w - 30), y: clamp(rect.y + Math.min(60, rect.h / 3), 20, this.view.h - 20) };
+    // her hand if she's free to use it, else straight out of her chip (or off her, mid-act)
+    const zapped = !this.stowed && !this.hidden && this.zap(at.x, at.y);
+    if (zapped) await sleep(140); // the arm's out on the 'zap' drawing (acting.js)
+    else {
+      const chip = this.stowed ? this.chipAt?.() : null;
+      const from = chip || (this.hidden ? null : this.head());
+      if (from) {
+        fx.bolt(from, at, { life: 300, forks: 2, width: 3 });
+        this.voice.play('bolt', { soft: true });
+      }
+    }
+    const dir = { x: at.x - (zapped ? this.pos.x : at.x - 1), y: 0.2 };
+    switch (how) {
+      case 'close':
+        fx.crack(at, dir, { size: 150 * s + 60, rect: live, covers, life: 900 });
+        fx.jolt(live, { covers, power: 1.4 });
+        fx.burst(at.x, at.y, { count: 14, power: 0.6, spread: 30 });
+        break;
+      case 'min':
+        fx.jolt(live, { covers, power: 1 });
+        fx.slices(rect.x + rect.w / 2, rect.y, rect.w * 0.6, Math.min(rect.h, 300), { count: 6 });
+        break;
+      case 'front': case 'appear':
+        fx.scan(live, { covers });
+        fx.ring(at.x, at.y, { size: 0.4 });
+        break;
+      case 'open':
+        fx.rift(at.x, at.y, { h: 260 * s + 80, side: at.x < this.pos.x ? 1 : -1 });
+        fx.ring(at.x, at.y, { size: 0.5 });
+        break;
+      case 'tray':
+        fx.ring(at.x, at.y, { size: 0.25 });
+        fx.burst(at.x, at.y, { count: 10, power: 0.5, spread: 18 });
+        break;
+      case 'pc':
+        fx.lines(this.view.w / 2, this.view.h / 2, { inner: 220 });
+        fx.ring(this.view.w / 2, this.view.h / 2, { size: 1.4 });
+        break;
+      default: // a button
+        fx.ring(at.x, at.y, { size: 0.3 });
+        fx.burst(at.x, at.y, { count: 10, power: 0.45, spread: 14 });
+        fx.crackle(() => at, { life: 420, radius: Math.max(rect.w, rect.h) * 0.7 + 10, count: 2 });
+        break;
+    }
+    return true;
+  }
+
   zap(x, y) {
-    if (this.busy || this.hidden || this.act || reducedMotion.matches || this.stance !== 'stand') return false;
+    if (this.busy || this.hidden || this.act || reducedMotion.matches || !['stand', 'sit'].includes(this.stance)) return false;
     const dir = x < this.pos.x ? -1 : 1;
     const side = this.armToward(dir);
     const reach = () => {
