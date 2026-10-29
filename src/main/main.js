@@ -926,7 +926,7 @@ function registerIpc() {
   ipcMain.on('overlay:rearm', () => rearmOverlay()); // the pointer moved over her and she never heard of it
   ipcMain.handle('overlay:cursor', () => {
     const p = screen.getCursorScreenPoint();
-    const b = overlay.getBounds();
+    const b = windowWatch?.home() ?? overlay.getBounds(); // from where her window belongs (it rides a dragged window)
     const inside = p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height;
     return { x: p.x - b.x, y: p.y - b.y, inside, display: displayAt(p).id };
   });

@@ -370,17 +370,15 @@ export class Capri {
     }
   }
 
-  // The window she sits on moved (you're dragging it): its new edge, once per screen refresh, and
-  // `lx`, `ly`: how much further it'll have gone by the time this drawing of her is on screen. She
-  // rides it there; whether she can stay on it is still the next full look's call (setWindows).
-  followSeat({ lx = 0, ly = 0, ...rect }) {
+  // The window she sits on moved (you're dragging it): its new edge, once per screen refresh. She
+  // rides it (her whole window is moved along too while this catches up: windows.ps1, Ride);
+  // whether she can stay on it is still the next full look's call (setWindows).
+  followSeat(rect) {
     if (this.stance !== 'sit' || this.perch?.id !== rect.id || this.busy || this.dragging) return;
     const win = this.windows.wins.find((w) => w.id === rect.id);
     if (win) Object.assign(win, rect);
     const on = win || rect;
     const to = this.seat(on, clamp(this.perch.dx, 50, on.w - 60));
-    to.x += lx;
-    to.y += ly;
     this.riding = performance.now();
     if (to.x !== this.pos.x || to.y !== this.pos.y) {
       this.pos = to;

@@ -16,7 +16,7 @@ const { screen } = require('electron');
 const SCRIPT = path.join(__dirname, 'windows.ps1').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 
 function startWindowWatch({ overlay, onUpdate, onSeat }) {
-  if (process.platform !== 'win32') return { stop() {}, refresh() {}, yours: () => null, seat() {} };
+  if (process.platform !== 'win32') return { stop() {}, refresh() {}, yours: () => null, seat() {}, home: () => overlay.getBounds() };
 
   let child = null;
   let stopped = false;
@@ -33,10 +33,20 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
     return { id: win.id, x: dip.x - bounds.x, y: dip.y - bounds.y, w: dip.width, h: dip.height, max: win.max };
   };
 
+  // Her window where it belongs. While she rides a window you drag, the helper moves her whole
+  // window along a little (windows.ps1, Ride) and puts it back after: everything here is still
+  // worked out from home.
+  let shifted = 0; // when the helper last had it off home
+  let home = null;
+  const homeBounds = () => {
+    if (!home || Date.now() - shifted > 500) home = overlay.getBounds();
+    return home;
+  };
+
   // the snapshot as seen from her window, wherever it is now
   const send = () => {
     if (!last || overlay.isDestroyed()) return;
-    const bounds = overlay.getBounds();
+    const bounds = homeBounds();
     const wins = last.wins
       .map((w) => toOverlay(w, bounds))
       // only what overlaps Capri's screen
@@ -54,12 +64,20 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
     });
   };
 
+  // the refresh rate of the screen she's on, for the helper to time her rides by
+  const sayHz = () => {
+    if (!child?.stdin.writable || overlay.isDestroyed()) return;
+    const hz = screen.getDisplayMatching(homeBounds()).displayFrequency;
+    if (hz > 0) child.stdin.write(`hz ${hz}\n`);
+  };
+
   const start = () => {
     child = spawn('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', SCRIPT, String(self), String(process.pid),
     ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin.on('error', () => {});
+    sayHz();
     if (seat) child.stdin.write(`${seat}\n`);
 
     readline.createInterface({ input: child.stdout }).on('line', (line) => {
@@ -74,11 +92,8 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
         const w = last?.wins.find((x) => x.id === data.seat);
         if (!w || overlay.isDestroyed()) return;
         Object.assign(w, { x: data.x, y: data.y, w: data.w, h: data.h });
-        // `lx`, `ly`: how far on from there it'll be once she's drawn (it's moving), in her pixels too
-        const bounds = overlay.getBounds();
-        const at = toOverlay(w, bounds);
-        const ahead = toOverlay({ ...w, x: w.x + (data.lx || 0), y: w.y + (data.ly || 0) }, bounds);
-        onSeat?.({ ...at, lx: ahead.x - at.x, ly: ahead.y - at.y });
+        if (data.ox || data.oy) shifted = Date.now(); // her window moved along with it, for now
+        onSeat?.(toOverlay(w, homeBounds()));
         return;
       }
       last = data;
@@ -98,9 +113,14 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
       child?.kill();
     },
     // her window moved (another screen, the taskbar in it or not): the same windows, from there
-    refresh: send,
+    refresh() {
+      sayHz();
+      send();
+    },
     // the window you're in (or were, before talking to her), if it's still there: its handle
     yours: () => (last?.wins.some((w) => w.id === yours) ? yours : null),
+    // her window's bounds where it belongs, even while it's moved along with a window you drag
+    home: homeBounds,
     // she sat on a window (its handle), or got off (0)
     seat(id) {
       const n = Number(id) || 0;

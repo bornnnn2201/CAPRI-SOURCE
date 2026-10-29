@@ -201,7 +201,13 @@ public static class CapriWindows {
         string line;
         while ((line = Console.In.ReadLine()) != null) {
           long id;
-          if (long.TryParse(line.Trim(), out id)) System.Threading.Interlocked.Exchange(ref seat, id);
+          double hz;
+          line = line.Trim();
+          if (line.StartsWith("hz ")) {
+            if (double.TryParse(line.Substring(3), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out hz) && hz >= 20 && hz <= 1000) { frameMs = 1000.0 / hz; frameSaid = true; }
+          } else if (long.TryParse(line, out id)) {
+            System.Threading.Interlocked.Exchange(ref seat, id);
+          }
         }
       } catch {}
     });
@@ -214,7 +220,7 @@ public static class CapriWindows {
     string last = "";
     int still = 0, tick = 0;
     var output = Console.Out;
-    Ride(output);
+    Ride(output, new IntPtr(self));
     var clock = System.Diagnostics.Stopwatch.StartNew();
     long next = 0;
     while (true) {
@@ -240,50 +246,78 @@ public static class CapriWindows {
 
   // The window she sits on, on its own thread so a snapshot never holds it up. While it's being
   // dragged it's read once per screen refresh, right after Windows draws the screen (in step with
-  // it: on a timer of its own, some refreshes got no news and she stuttered), and she's put where
-  // it will be by the time her own drawing reaches the screen, ~2 refreshes later, from how fast
-  // it's going: on the window, not trailing it.
+  // it: on a timer of its own, some refreshes got no news and she stuttered), and goes to her page.
+  // But her page takes ~6-8 of her screen's refreshes to get a drawing of her on it (Electron, a
+  // see-through window, measured at 165 Hz), and she trailed the window by that much. So her whole
+  // window is moved too, by Windows, which shows it a refresh or two later: by as far as the window
+  // went in the time her page hasn't caught up with, plus those refreshes at its speed. She's drawn
+  // on the window, and her window drifts back home as her page catches up once it stops, with
+  // nothing to jump. Counted in refreshes of the screen she's on, whatever its rate (60, 165 Hz...).
+  // (CAPRI_DRAWN / CAPRI_MOVED: other counts, to measure with.)
   static int seatMoved = 0;
-  static void Ride(System.IO.TextWriter output) {
+  static double DRAWN = 8, MOVED = 2;
+  static void Ride(System.IO.TextWriter output, IntPtr self) {
+    double d;
+    if (double.TryParse(Environment.GetEnvironmentVariable("CAPRI_DRAWN") ?? "", System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) DRAWN = d;
+    if (double.TryParse(Environment.GetEnvironmentVariable("CAPRI_MOVED") ?? "", System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) MOVED = d;
     var t = new System.Threading.Thread(() => {
       var clock = System.Diagnostics.Stopwatch.StartNew();
       string last = "";
       long lastId = 0;
-      double px = 0, py = 0, pt = 0, vx = 0, vy = 0, frame = 1000.0 / 60, lastMove = -10000;
-      int idle = 0;
+      var trail = new List<double[]>(); // the window's last looks: { when, x, y }
+      double vx = 0, vy = 0, lastMove = -10000;
+      int idle = 0, ox = 0, oy = 0;
+      RECT home = new RECT(); // her window where it belongs
       while (true) {
         long id = System.Threading.Interlocked.Read(ref seat);
-        if (id == 0) { lastId = 0; Wait(50); continue; }
+        if (id == 0) {
+          if (ox != 0 || oy != 0) { Shift(self, home, 0, 0); ox = oy = 0; } // she got off: her window home
+          lastId = 0;
+          Wait(50);
+          continue;
+        }
         var h = new IntPtr(id);
-        bool fast = clock.Elapsed.TotalMilliseconds - lastMove < 400 || Dragged(h);
+        bool fast = clock.Elapsed.TotalMilliseconds - lastMove < 400 || ox != 0 || oy != 0 || Dragged(h);
         if (fast) {
           double before = clock.Elapsed.TotalMilliseconds;
           if (!Refresh()) Wait(4);
           double gap = clock.Elapsed.TotalMilliseconds - before;
-          if (gap > 2 && gap < 40) frame = frame * 0.9 + gap * 0.1; // how long a refresh is on this screen
+          if (gap > 2 && gap < 60) frameTimed = frameTimed > 0 ? frameTimed * 0.9 + gap * 0.1 : gap;
         } else {
           Wait(30); // sitting still: just to notice it start
         }
         RECT r;
         if (DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out r, 16) != 0) continue;
         double now = clock.Elapsed.TotalMilliseconds;
-        if (id != lastId) { lastId = id; last = ""; px = r.Left; py = r.Top; pt = now; vx = vy = 0; idle = 2; }
-        double dt = Math.Max(1, now - pt);
-        if (r.Left != px || r.Top != py) {
-          vx = vx * 0.4 + (r.Left - px) / dt * 0.6; // px per ms
-          vy = vy * 0.4 + (r.Top - py) / dt * 0.6;
-          idle = 0;
-          lastMove = now;
-        } else if (++idle >= 2) {
-          vx = vy = 0; // stopped: back onto where it really is
-        } else {
-          vx *= 0.5; vy *= 0.5; // a refresh the window missed, or it's stopping
+        double frame = Frame();
+        if (id != lastId) { lastId = id; last = ""; trail.Clear(); vx = vy = 0; idle = 2; }
+        if (trail.Count > 0) {
+          double[] p = trail[trail.Count - 1];
+          double dt = Math.Max(1, now - p[0]);
+          if (r.Left != p[1] || r.Top != p[2]) {
+            vx = vx * 0.4 + (r.Left - p[1]) / dt * 0.6; // px per ms
+            vy = vy * 0.4 + (r.Top - p[2]) / dt * 0.6;
+            idle = 0;
+            lastMove = now;
+          } else if (++idle >= 2) {
+            vx = vy = 0;
+          } else {
+            vx *= 0.5; vy *= 0.5; // a refresh the window missed, or it's stopping
+          }
         }
-        px = r.Left; py = r.Top; pt = now;
-        double lead = Math.Min(40, frame * 2.2);
-        int lx = (int)Math.Round(Math.Max(-160, Math.Min(160, vx * lead)));
-        int ly = (int)Math.Round(Math.Max(-160, Math.Min(160, vy * lead)));
-        string s = "{\"seat\":" + id + ",\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"w\":" + (r.Right - r.Left) + ",\"h\":" + (r.Bottom - r.Top) + ",\"lx\":" + lx + ",\"ly\":" + ly + "}";
+        trail.Add(new double[] { now, r.Left, r.Top });
+        double back = (DRAWN - MOVED) * frame;
+        while (trail.Count > 2 && trail[1][0] < now - back - frame) trail.RemoveAt(0);
+        // where her page has her drawn by now: where the window was that long ago
+        double[] then = At(trail, now - back);
+        int nx = (int)Math.Round(Math.Max(-300, Math.Min(300, r.Left - then[1] + vx * MOVED * frame)));
+        int ny = (int)Math.Round(Math.Max(-300, Math.Min(300, r.Top - then[2] + vy * MOVED * frame)));
+        if (nx != ox || ny != oy) {
+          if (ox == 0 && oy == 0) GetWindowRect(self, out home);
+          Shift(self, home, nx, ny);
+          ox = nx; oy = ny;
+        }
+        string s = "{\"seat\":" + id + ",\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"w\":" + (r.Right - r.Left) + ",\"h\":" + (r.Bottom - r.Top) + ",\"ox\":" + ox + ",\"oy\":" + oy + "}";
         if (s == last) continue;
         bool first = last == "";
         last = s;
@@ -320,6 +354,32 @@ public static class CapriWindows {
     info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
     return GetGUIThreadInfo(tid, ref info) && (info.flags & 2) != 0; // GUI_INMOVESIZE
   }
+
+  // Where the window was at `when`, between two of its looks.
+  static double[] At(List<double[]> trail, double when) {
+    if (when <= trail[0][0]) return trail[0];
+    for (int i = 1; i < trail.Count; i++) {
+      double[] a = trail[i - 1], b = trail[i];
+      if (b[0] < when) continue;
+      double k = (when - a[0]) / Math.Max(0.001, b[0] - a[0]);
+      return new double[] { when, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k };
+    }
+    return trail[trail.Count - 1];
+  }
+
+  // Her window moved by (dx, dy) from home, without waiting on her app to say it's done.
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  static void Shift(IntPtr self, RECT home, int dx, int dy) {
+    if (self == IntPtr.Zero) return;
+    SetWindowPos(self, IntPtr.Zero, home.Left + dx, home.Top + dy, 0, 0, 0x4215); // NOSIZE, NOZORDER, NOACTIVATE, NOOWNERZORDER, ASYNCWINDOWPOS
+  }
+
+  // How long one refresh is on her screen (ms): Capri says its refresh rate ("hz 165" on stdin, again
+  // when she's on another screen); until then, timed from the screen's own refreshes.
+  static double frameMs = 1000.0 / 60, frameTimed = 0;
+  static bool frameSaid = false;
+  static double Frame() { return frameSaid ? frameMs : frameTimed > 0 ? frameTimed : frameMs; }
 
   // A precise wait without raising Windows' timer for everyone (Sleep only wakes every 15.6 ms here).
   [DllImport("kernel32.dll")] static extern IntPtr CreateWaitableTimerExW(IntPtr attrs, IntPtr name, uint flags, uint access);
