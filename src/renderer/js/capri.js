@@ -639,7 +639,7 @@ export class Capri {
 
   flourish() {
     if (this.stance === 'sit') this.perform(pick(['split', 'sway', 'swing', 'lounge', 'below', 'glitch', 'preen', 'shrug', 'drum', 'kickup', 'rock', 'headbang', 'think']), this.towardCenter());
-    else this.perform(pick(['spin', 'hop', 'split', 'phase', 'jab', 'bounce', 'drift', 'dance', 'glitch', 'peer', 'preen', 'flip', 'guitar', 'twirl', 'zoom', 'pump', 'wobble', 'headbang', 'salute']), this.towardCenter());
+    else this.perform(pick(['spin', 'hop', 'split', 'phase', 'jab', 'bounce', 'dance', 'glitch', 'peer', 'preen', 'flip', 'guitar', 'twirl', 'zoom', 'pump', 'wobble', 'headbang', 'salute', 'curious', 'look', 'behind']), this.towardCenter());
   }
 
   // Off somewhere new (wandering): now and then she does a little something once she's there.
@@ -663,14 +663,14 @@ export class Capri {
     const stand = sit ? 0 : 1;
     const choices = [
       ['look', 1.4], ['sway', 1.4], ['scan', 1], ['curious', near ? 3 : 1], ['phase', 1.2],
-      ['stretch', sit ? 0 : 1.5], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
-      ['hop', sit ? 0 : 0.8], ['glitch', 1.2], ['preen', 1.2], ['shrug', 0.8], ['behind', 1.2], ['peer', sit ? 0 : near ? 0.6 : 1.4],
-      ['jab', stand], ['bounce', stand], ['drift', sit ? 0 : 1.2], ['dance', stand], ['nod', sit || !bored ? 0 : 2],
+      ['stretch', sit ? 0 : 1], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
+      ['hop', sit ? 0 : 0.8], ['glitch', 1.2], ['preen', 1.2], ['shrug', 0.4], ['behind', 1.2], ['peer', sit ? 0 : near ? 0.6 : 1.4],
+      ['jab', stand], ['bounce', stand], ['drift', sit ? 0 : 0.5], ['dance', stand], ['nod', sit || !bored ? 0 : 2],
       ['swing', sit ? 2 : 0], ['lounge', sit ? 1.5 : 0], ['below', sit ? 1.5 : 0],
       // the bigger ones
       ['flip', sit ? 0 : 0.9], ['headbang', 1], ['guitar', stand * 1.1], ['sneeze', 0.7], ['hiccup', 0.8], ['wobble', stand],
-      ['pump', 0.9], ['facepalm', 0.8], ['think', 1.1], ['salute', near ? 1 : 0.4], ['peekaboo', near ? 1.4 : 0.5],
-      ['bend', stand], ['zoom', stand * 0.9], ['meditate', sit ? 0 : bored ? 2 : 0.7], ['twirl', stand],
+      ['pump', 0.9], ['facepalm', 0.8], ['think', 1.1], ['salute', near ? 1 : 0.4], ['peekaboo', near ? 0.7 : 0.25],
+      ['bend', stand * 0.5], ['zoom', stand * 0.9], ['meditate', sit ? 0 : bored ? 0.8 : 0.25], ['twirl', stand],
       ['drum', sit ? 1.6 : 0], ['kickup', sit ? 1.2 : 0], ['rock', sit ? 1.4 : 0], ['doze', sit && bored ? 2 : sit ? 0.4 : 0],
     ].map(([n, w]) => [n, (this.recentIdle || []).includes(n) ? 0 : w]); // none of the last few again
     let roll = Math.random() * choices.reduce((n, [, w]) => n + w, 0);

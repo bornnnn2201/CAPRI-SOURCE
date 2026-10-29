@@ -2,10 +2,12 @@
 // are red like the rest of her, black only as linework, while the cut-out has her arm (which the
 // shader mirrors for the other one) and her left leg filled in black. Those black fills go red,
 // the crimson of the rest of her (the shader grades it to the show's hot red), keeping a pixel of
-// black along every edge so her lines stay. Her mask, the black spikes around her head, her neck and
-// her hips stay as they are. Same size, same cut-out: everything in sprite.js still lines up.
+// black along every edge so her lines stay. The green shard by her shin goes red too, and her mask is
+// drawn again at the show's size, with her white zigzag of a mouth. The black spikes around her head,
+// her neck and her hips stay as they are. Same size, same cut-out: everything in sprite.js lines up.
 //
-//   node tools/recolor-sprite.mjs      (needs ffmpeg on the PATH, or FFMPEG=...)
+//   node tools/recolor-sprite.mjs      (needs ffmpeg on the PATH, or FFMPEG=...; on build-sprite.py's
+//                                       output: run it once)
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -61,7 +63,96 @@ for (let y = 0; y < H; y++) {
     changed++;
   }
 }
+// the long green shard down by her left shin: red, like the one on her other side (the show's green
+// is a patch on her thigh, kept, and on her chest)
+const green = (i) => px[i + 3] >= 128 && px[i + 1] > px[i] * 1.4 && px[i + 1] > px[i + 2] * 1.2 && px[i + 1] > 80;
+let shard = 0;
+for (let y = 268; y < H; y++) {
+  for (let x = 0; x < 118; x++) {
+    const i = at(x, y);
+    if (!green(i)) continue;
+    px[i] = RED[0]; px[i + 1] = RED[1]; px[i + 2] = RED[2]; // (its edges get her violet line from the shader)
+    shard++;
+  }
+}
+
+// Her mask, the show's size: a tilted green face (her own green), black almond eyes with her green
+// ring, blue iris and white pupil in each, black under it with her white zigzag of a mouth. Drawn
+// over the small one, around FACE (sprite.js), anti-aliased (4x4 samples a pixel).
+const sample = (test) => {
+  const got = [];
+  for (let y = 112; y < 148; y++) for (let x = 100; x < 145; x++) if (test(at(x, y))) got.push(at(x, y));
+  if (!got.length) return null;
+  const m = (k) => got.map((i) => px[i + k]).sort((p, q) => p - q)[got.length >> 1];
+  return [m(0), m(1), m(2)];
+};
+const GREEN = sample(green) || [24, 200, 90];
+const BLUE = [24, 96, 250]; // the show's (the small old eyes had gone teal)
+const INK = [12, 8, 18], WHITE = [250, 246, 248];
+const C = { x: 121, y: 131 }, TILT = -0.38;
+const toLocal = (x, y) => {
+  const dx = x - C.x, dy = y - C.y, c = Math.cos(-TILT), s = Math.sin(-TILT);
+  return [dx * c - dy * s, dx * s + dy * c];
+};
+const inPoly = (pts, u, v) => {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [ui, vi] = pts[i], [uj, vj] = pts[j];
+    if ((vi > v) !== (vj > v) && u < ((uj - ui) * (v - vi)) / (vj - vi) + ui) inside = !inside;
+  }
+  return inside;
+};
+const nearLine = (pts, u, v, w) => pts.slice(1).some(([u1, v1], k) => {
+  const [u0, v0] = pts[k];
+  const du = u1 - u0, dv = v1 - v0;
+  const t = Math.max(0, Math.min(1, ((u - u0) * du + (v - v0) * dv) / (du * du + dv * dv)));
+  return Math.hypot(u - (u0 + du * t), v - (v0 + dv * t)) <= w;
+});
+const FACE_POLY = [[-23, 4], [-12, -8], [23, -14], [20, 0], [12, 8], [-14, 9]];
+const CHIN = [[-15, 8], [13, 7], [9, 17], [-1, 20], [-11, 17]];
+const MOUTH = [[-9, 12.5], [-5, 15], [-2, 12], [2, 15], [5, 12], [9, 14]];
+const EYES = [[-8, 0.5], [8, -2.5]];
+// what's at a point of it, painted last-on-top, or null outside it
+const paint = (u, v) => {
+  let col = null;
+  if (inPoly(CHIN, u, v)) col = INK;
+  if (inPoly(FACE_POLY, u, v)) col = GREEN;
+  if (col && nearLine(MOUTH, u, v, 0.55)) col = WHITE;
+  for (const [eu, ev] of EYES) {
+    const r = Math.hypot((u - eu) / 5.6, (v - ev) / 4.2);
+    if (r <= 1) {
+      const d = Math.hypot(u - eu, v - ev);
+      col = d <= 1.2 ? WHITE : d <= 2.9 ? BLUE : d <= 3.6 ? GREEN : INK;
+    }
+  }
+  // her ink line around the green
+  if (col === GREEN && !inPoly(FACE_POLY.map(([a, b]) => [a * 0.93, b * 0.88]), u, v)) col = INK;
+  return col;
+};
+let mask = 0;
+for (let y = C.y - 26; y <= C.y + 26; y++) {
+  for (let x = C.x - 28; x <= C.x + 28; x++) {
+    const acc = [0, 0, 0];
+    let hits = 0;
+    for (let sy = 0; sy < 4; sy++) {
+      for (let sx = 0; sx < 4; sx++) {
+        const [u, v] = toLocal(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4);
+        const col = paint(u, v);
+        if (!col) continue;
+        hits++;
+        acc[0] += col[0]; acc[1] += col[1]; acc[2] += col[2];
+      }
+    }
+    if (!hits) continue;
+    const i = at(x, y);
+    const k = hits / 16;
+    for (let c = 0; c < 3; c++) px[i + c] = Math.round(px[i + c] * (1 - k) + (acc[c] / hits) * k);
+    px[i + 3] = Math.max(px[i + 3], Math.round(255 * k));
+    mask++;
+  }
+}
+
 fs.writeFileSync(raw, px);
 execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${W}x${H}`, '-i', raw, FILE]);
 fs.rmSync(raw, { force: true });
-console.log(`recoloured ${changed} pixels to rgb(${RED.join(', ')})`);
+console.log(`recoloured ${changed} pixels to rgb(${RED.join(', ')}), ${shard} of the shin shard, mask over ${mask} pixels`);
