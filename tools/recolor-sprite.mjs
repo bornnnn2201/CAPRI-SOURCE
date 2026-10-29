@@ -102,8 +102,9 @@ for (const [x, y] of greens) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy +
 const axis = 0.5 * Math.atan2(2 * sxy, sxx - syy); // the green's long axis, in the frame
 const along = greens.map(([x, y]) => (x - mx) * Math.cos(axis) + (y - my) * Math.sin(axis));
 const length = Math.max(...along) - Math.min(...along);
-// on her sprite: its middle at the small mask's, her head's tilt, about 40 sprite pixels long
-const TO = { x: 121, y: 131 }, TILT = -0.38, LONG = 46;
+// on her sprite: its middle at the small mask's, a little less tilted than her head (facing you, as in the
+// show), about 52 sprite pixels wide
+const TO = { x: 121, y: 129 }, TILT = -0.24, LONG = 52;
 const k = LONG / length, turn = TILT - axis;
 const fromSprite = (x, y) => {
   const dx = (x - TO.x) / k, dy = (y - TO.y) / k, c = Math.cos(-turn), s = Math.sin(-turn);

@@ -214,7 +214,7 @@ vec2 bend(vec2 q) {
   if (uMane != 0.0) {
     vec2 d = q - MANE;
     float spikes = 0.55 + 0.9 * vnoise(vec2(atan(d.y, d.x) * 2.6, 4.0));
-    float w = smoothstep(182.0, 60.0, q.y) * smoothstep(16.0, 30.0, distance(q, FACE));
+    float w = smoothstep(182.0, 60.0, q.y) * smoothstep(27.0, 40.0, distance(q, FACE)); // her mask (52 wide) stays whole
     q = MANE + d / (1.0 + uMane * w * 0.32 * spikes);
   }
 
