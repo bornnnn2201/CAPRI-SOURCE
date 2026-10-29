@@ -84,9 +84,10 @@ if (require.main === module && process.send) {
   idle = setTimeout(() => process.exit(0), IDLE_MS);
 }
 
-// the blended voice she talks with by default, made once from Kokoro's own table (speech.js, on install)
+// the blended voice she talks with by default, made from Kokoro's own table (speech.js, on install),
+// plus the Kokoro voices you imported, each in its row: `mine` [{ sid, file }] (myvoices.js)
 module.exports = { blend };
-function blend(dir) {
+function blend(dir, mine = []) {
   const ROW = 510 * 256 * 4; // one voice: 510 styles of 256 floats
   const table = fs.readFileSync(path.join(dir, 'voices.bin'));
   const row = (i) => new Float32Array(table.buffer, table.byteOffset + i * ROW, ROW / 4);
@@ -96,5 +97,14 @@ function blend(dir) {
   const out = Buffer.from(table);
   const mix = new Float32Array(out.buffer, out.byteOffset + 53 * ROW, ROW / 4);
   for (let i = 0; i < mix.length; i++) mix[i] = 0.45 * heart[i] + 0.35 * bella[i] + 0.2 * nicole[i];
-  fs.writeFileSync(path.join(dir, 'voices-capri.bin'), out);
+  for (const { sid, file } of mine) {
+    try {
+      const voice = fs.readFileSync(file);
+      if (voice.length === ROW && sid > 0 && sid < 53) voice.copy(out, sid * ROW);
+    } catch {} // gone: that row keeps Kokoro's own voice
+  }
+  // written aside first: a half-written table would leave her voiceless
+  const to = path.join(dir, 'voices-capri.bin');
+  fs.writeFileSync(`${to}.new`, out);
+  fs.renameSync(`${to}.new`, to);
 }

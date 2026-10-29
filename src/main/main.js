@@ -457,6 +457,34 @@ async function voiceOn(patch) {
   updateConfig(patch);
 }
 
+// Voice > Import a voice…: a Piper or Kokoro voice file you pick, copied in, switched to, and she
+// says a line in it. What's wrong with a file is said in plain words.
+async function importVoice() {
+  const t = TRAY[resolveLang(config.load().lang)];
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: t.voiceImportTitle,
+    properties: ['openFile'],
+    filters: [{ name: 'Piper / Kokoro', extensions: ['onnx', 'pt', 'npy', 'bin'] }],
+  });
+  if (canceled || !filePaths?.[0]) return;
+  let voice;
+  try {
+    voice = speech.importVoice(filePaths[0]);
+  } catch (err) {
+    await dialog.showMessageBox({ type: 'warning', title: 'Capri', message: t.voiceImportBad, detail: err.message });
+    return;
+  }
+  await voiceOn({ ttsVoice: voice.id, speak: true }); // fetches her engine for it, if it isn't here yet
+  rebuildTray();
+  if (speech.state(config.load()).mouth) sendCommand('voiceTry');
+}
+
+function removeVoice(id) {
+  speech.removeVoice(id);
+  if (config.load().ttsVoice === id) updateConfig({ ttsVoice: 'kokoro_capri' }); // back to her own
+  rebuildTray();
+}
+
 function rebuildTray() {
   if (!tray) return;
   const cfg = config.load();
@@ -555,6 +583,12 @@ function rebuildTray() {
             label: v.label, type: 'radio', checked: (cfg.ttsVoice || 'kristin') === id, click: () => voiceOn({ ttsVoice: id }),
           })),
         },
+        // your own voices (myvoices.js)
+        { label: t.voiceImport, enabled: !voiceBusy, click: () => importVoice() },
+        ...(Object.values(speech.VOICES).some((v) => v.mine) ? [{
+          label: t.voiceRemove,
+          submenu: Object.entries(speech.VOICES).filter(([, v]) => v.mine).map(([id, v]) => ({ label: v.label, click: () => removeVoice(id) })),
+        }] : []),
         { type: 'separator' },
         voiceBusy ? { label: t.voiceBusy, enabled: false }
           : voiceState.mouth && voiceState.ears ? { label: t.voiceNote, enabled: false }

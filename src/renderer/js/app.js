@@ -1089,6 +1089,12 @@ async function boot() {
         else if (cmd.topic === 'menu') guide.menu();
         else if (typeof guide[cmd.topic] === 'function') guide.scene(() => guide[cmd.topic]());
         break;
+      case 'voiceTry': { // a voice you just imported (her menu): she tries it on
+        const line = pick(['New voice. How do I sound, choom?', 'Testing, testing. Still me in here, just a new throat.', 'Okay. This is me now. Like it?']);
+        if (!capri.stowed) panel.say({ kind: 'info', face: 'smug', line, hold: 6000 });
+        speech.say(line);
+        break;
+      }
       case 'stow': // Ctrl+Alt+C: into her biochip, or back out
         if (cmd.on) {
           voice.play('bye');

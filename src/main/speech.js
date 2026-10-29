@@ -11,6 +11,7 @@ const crypto = require('node:crypto');
 const net = require('node:net');
 const { spawn, execFile } = require('node:child_process');
 const { app } = require('electron');
+const myvoices = require('./myvoices');
 
 const HF = 'https://huggingface.co';
 const GH = 'https://github.com';
@@ -85,7 +86,18 @@ const files = (voice) => ({
   sharp: path.join(dir(), 'ggml-small.en.bin'),
   kokoro: path.join(dir(), 'kokoro'),
 });
-const voiceOf = (cfg) => (VOICES[cfg.ttsVoice] ? cfg.ttsVoice : 'kristin');
+// the voices you imported (myvoices.js), listed with hers: once, then after every import or removal
+const mineDir = () => path.join(dir(), 'mine');
+let mineRead = false;
+function readMine() {
+  mineRead = true;
+  for (const id of Object.keys(VOICES)) if (id.startsWith('mine_')) delete VOICES[id];
+  for (const v of myvoices.list(mineDir())) VOICES[v.id] = { ...v, mine: true };
+}
+const voiceOf = (cfg) => {
+  if (!mineRead) readMine();
+  return VOICES[cfg.ttsVoice] ? cfg.ttsVoice : 'kristin';
+};
 const kokoroOf = (voice) => VOICES[voice].engine === 'kokoro';
 const kokoroHere = (f) => ['model.onnx', 'voices.bin', 'voices-capri.bin', 'tokens.txt', 'lexicon-us-en.txt', 'lexicon-gb-en.txt']
   .every((n) => fs.existsSync(path.join(f.kokoro, n)));
@@ -107,9 +119,10 @@ function missing(cfg) {
   return [
     kokoro && !kokoroHere(f) && { ...KOKORO, unzip: true },
     !kokoro && !fs.existsSync(f.piper) && { ...PIPER, unzip: true },
-    !kokoro && !fs.existsSync(f.onnx) && { ...v.onnx, to: f.onnx },
+    // (one of yours is already here, or gone: nothing to fetch for it)
+    !kokoro && !v.mine && !fs.existsSync(f.onnx) && { ...v.onnx, to: f.onnx },
     // the voice's settings file is tiny and has no checksum of its own: it comes with its model
-    !kokoro && !fs.existsSync(f.json) && { url: `${v.onnx.url}.json`, to: f.json, size: 5000 },
+    !kokoro && !v.mine && !fs.existsSync(f.json) && { url: `${v.onnx.url}.json`, to: f.json, size: 5000 },
     !fs.existsSync(f.whisper) && { ...WHISPER, unzip: true },
     !fs.existsSync(f.ears) && { ...EARS, to: f.ears },
     !fs.existsSync(f.sharp) && { ...SHARP, to: f.sharp },
@@ -136,7 +149,7 @@ function install(cfg, onProgress) {
         const only = item.untar ? [...(item.strip ? ['--strip-components', String(item.strip)] : []), ...item.untar] : [];
         await new Promise((resolve, reject) => execFile(tar, ['-xf', tmp, '-C', into, ...only], { windowsHide: true }, (err) => (err ? reject(err) : resolve())));
         fs.rmSync(tmp, { force: true });
-        if (item.url === KOKORO.url) require('./kokoro').blend(into); // her own voice, mixed from its table
+        if (item.url === KOKORO.url) remix(); // her own voice mixed from its table, and yours put in
       } else {
         fs.renameSync(tmp, item.to);
       }
@@ -181,9 +194,11 @@ async function speak(cfg, text) {
     const { sid, speed, gb } = VOICES[voice];
     return { main: await kokoroSay({ text: line, sid, speed, gb: Boolean(gb), dir: f.kokoro }), low: null, pitch };
   }
+  // yours keep their own pace (`length`); hers are slowed to make up for being pitched up
+  const length = VOICES[voice].length ?? pitch * PACE;
   const [main, low] = await Promise.all([
-    render(f, line, pitch * PACE, 0.12, speaker),
-    cfg.glitch === 'heavy' ? render(f, line, (pitch * PACE) / 2, 0.06, speaker).catch(() => null) : null,
+    render(f, line, length, 0.12, speaker),
+    cfg.glitch === 'heavy' ? render(f, line, length / 2, 0.06, speaker).catch(() => null) : null,
   ]);
   return { main, low, pitch };
 }
@@ -224,6 +239,34 @@ function kokoroSay(msg) {
   });
 }
 app.on('will-quit', () => kokoro?.kill());
+
+// Her Kokoro table made again: her blend, and your Kokoro voices in their rows. The worker goes, so
+// her next line loads the new one.
+function remix() {
+  const f = files('kokoro_capri');
+  if (!fs.existsSync(path.join(f.kokoro, 'voices.bin'))) return;
+  kokoro?.kill();
+  kokoro = null;
+  kokoroWarm = null;
+  const mine = Object.values(VOICES).filter((v) => v.mine && v.engine === 'kokoro').map((v) => ({ sid: v.sid, file: path.join(mineDir(), v.file) }));
+  require('./kokoro').blend(f.kokoro, mine);
+}
+
+// A voice file you picked (Voice > Import a voice…): copied in and listed. Throws, in words for you,
+// when it isn't one she can use.
+function importVoice(file) {
+  const voice = myvoices.importFile(mineDir(), file);
+  readMine();
+  if (voice.engine === 'kokoro') remix();
+  return VOICES[voice.id];
+}
+
+function removeVoice(id) {
+  const voice = myvoices.remove(mineDir(), id);
+  readMine();
+  if (voice?.engine === 'kokoro') remix();
+  return voice;
+}
 
 // her voice ready before her next line (Kokoro only: Piper loads per line anyway)
 function warmVoice(cfg) {
@@ -474,4 +517,4 @@ function keepHeard(file, entry) {
   }
 }
 
-module.exports = { VOICES, PITCH, state, install, speak, warmVoice, hear, warm, stopEars };
+module.exports = { VOICES, PITCH, state, install, speak, warmVoice, importVoice, removeVoice, hear, warm, stopEars };
