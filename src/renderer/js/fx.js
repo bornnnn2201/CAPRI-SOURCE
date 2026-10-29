@@ -23,10 +23,11 @@ const FRAME_MS = 1000 / 24;
 // layer is a whole new frame of her screen-sized window, so half as many is half the work.
 const LAZY_MS = 1000 / 12;
 const LAZY = new Set(['drift', 'glyph']);
-const CUTIN = { w: 360, h: 240 }; // assets/capri/cutin-*.png
+const CUTIN = { w: 720, h: 480 }; // assets/capri/cutin-*.png (cleaned up to flat cel colours, twice their show size)
 // her intro (see intro()): her close-up holding your screen by its edges
-// (assets/capri/intro-grab.webp, cut out by tools/build-intro.py), where things are on it in its
-// pixels, and when things happen, in drawings at 24 fps
+// (assets/capri/intro-grab.webp, cut out by tools/build-intro.py), where things are on it in these
+// pixels (the pictures themselves are 1.25x that, 2090x1176, cleaned to flat cel colours: sharp on a
+// full screen), and when things happen, in drawings at 24 fps
 const GRAB = {
   w: 1672, h: 941,
   face: { x: 830, y: 330, size: 430 }, // the middle of her face, and about how wide it is
@@ -648,13 +649,13 @@ export class FxLayer {
       c.width = GRAB.w;
       c.height = GRAB.h;
       const g = c.getContext('2d');
-      g.drawImage(this.grab, 0, 0);
+      g.drawImage(this.grab, 0, 0, GRAB.w, GRAB.h);
       g.globalCompositeOperation = mode;
       g.fillStyle = fill;
       g.fillRect(0, 0, c.width, c.height);
       if (mode === 'multiply') {
         g.globalCompositeOperation = 'destination-in'; // multiply fills her cut-out background too
-        g.drawImage(this.grab, 0, 0);
+        g.drawImage(this.grab, 0, 0, GRAB.w, GRAB.h);
       }
       return c;
     };
@@ -695,7 +696,7 @@ export class FxLayer {
       ctx.drawImage(c.channels[2], d, -d * 0.3);
       ctx.globalCompositeOperation = 'source-over';
     } else {
-      ctx.drawImage(this.grabFrames[cel] || this.grab, 0, 0);
+      ctx.drawImage(this.grabFrames[cel] || this.grab, 0, 0, GRAB.w, GRAB.h); // its pictures are 1.25x that, for a sharp full screen
       if (!OWN_EYES.has(cel) || !this.grabFrames[cel]) GRAB.eyes.forEach((e) => this.grabEye(e, look, open));
     }
     ctx.restore();
@@ -1199,26 +1200,51 @@ export class FxLayer {
         const top = it.down ? it.bottom * k * 0.15 : 0;
         const h = it.bottom - top;
         ctx.save();
-        // jagged edges, re-rolled every frame
-        const edge = (side) => {
+        // a glow around her column of light, red into violet, fading as it narrows
+        const spread = w * 2.4 + 10;
+        const glow = ctx.createLinearGradient(it.x - spread, 0, it.x + spread, 0);
+        glow.addColorStop(0, 'rgba(123, 61, 255, 0)');
+        glow.addColorStop(0.35, `rgba(123, 61, 255, ${0.18 * (1 - t * 0.6)})`);
+        glow.addColorStop(0.5, `rgba(255, 33, 82, ${0.38 * (1 - t * 0.6)})`);
+        glow.addColorStop(0.65, `rgba(123, 61, 255, ${0.18 * (1 - t * 0.6)})`);
+        glow.addColorStop(1, 'rgba(123, 61, 255, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(it.x - spread, top, spread * 2, h);
+        // jagged edges, fine, re-rolled every frame: a hard outer edge, a hotter one inside it
+        const edge = (side, k = 1, step = 7) => {
           const pts = [];
-          for (let y = top; y <= it.bottom; y += 18) pts.push([it.x + side * (w / 2 + rand(0, w * 0.35)), y]);
+          for (let y = top; y <= it.bottom + step; y += step) pts.push([it.x + side * k * (w / 2 + rand(0, w * 0.3)), Math.min(y, it.bottom)]);
           return pts;
         };
-        const left = edge(-1), right = edge(1).reverse();
-        const poly = (dx) => {
+        const shape = (k) => [...edge(-1, k), ...edge(1, k).reverse()];
+        const fillShape = (pts, dx, color) => {
           ctx.beginPath();
-          [...left, ...right].forEach(([x, y], i) => (i ? ctx.lineTo(x + dx, y) : ctx.moveTo(x + dx, y)));
+          pts.forEach(([x, y], i) => (i ? ctx.lineTo(x + dx, y) : ctx.moveTo(x + dx, y)));
           ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
         };
-        poly(-4);
-        ctx.fillStyle = COLORS.violet;
-        ctx.fill();
-        poly(0);
-        ctx.fillStyle = COLORS.red;
-        ctx.fill();
+        const outer = shape(1);
+        fillShape(outer, -4, COLORS.violet); // her misregistration, as on everything of hers
+        fillShape(outer, 0, COLORS.red);
+        fillShape(shape(0.55), 0, '#ff6f96');
+        // the white-hot core, glowing
+        ctx.shadowColor = COLORS.paper;
+        ctx.shadowBlur = 14;
         ctx.fillStyle = COLORS.paper;
         ctx.fillRect(it.x - Math.max(1, w * 0.12), top, Math.max(2, w * 0.24), h);
+        ctx.shadowBlur = 0;
+        // light racing up it, and bits of her flicking off its edges
+        for (let i = 0; i < 6; i++) {
+          const y = it.bottom - ((now * 0.9 + i * 157) % Math.max(1, h));
+          ctx.fillStyle = i % 2 ? 'rgba(255, 244, 246, 0.85)' : 'rgba(255, 150, 180, 0.7)';
+          ctx.fillRect(it.x - w * 0.42, y, w * 0.84, 2);
+        }
+        for (let i = 0; i < 8; i++) {
+          const side = i % 2 ? 1 : -1;
+          ctx.fillStyle = i % 3 ? COLORS.red : COLORS.paper;
+          ctx.fillRect(it.x + side * (w / 2 + rand(4, 26)), top + rand(0, h), rand(2, 4), rand(2, 7));
+        }
         ctx.restore();
         break;
       }
