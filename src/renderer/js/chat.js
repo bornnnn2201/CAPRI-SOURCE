@@ -236,7 +236,7 @@ export const QUICKHACK_LINES = {
 // Her hands on your PC (control.js in main): what you asked for, read off what you said, done by her
 // right away (never by a model, which would only say it did). { kind: 'pc', op, target?, value? }
 // `target`: an app as listed (its process name), or 'this' (the window you're in).
-const FILLER_START = /^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)?[,.!\s]*(?:(?:can|could|would|will) you|please|pls|go ahead and|i (?:want|need) you to|quickly)?\s*/i;
+const FILLER_START = /^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)?[,.!\s]*(?:(?:bro(?:ther)?|bruh|dude|man|mate|homie|choom|yo|okay|ok|alright)[,.!\s]+)*(?:(?:can|could|would|will) you|please|pls|go ahead and|i (?:want|need) you to|quickly)?\s*/i;
 const FILLER_END = /\s*(?:for me|please|pls|now|right now|real quick)?\s*[.!?]*$/i;
 const PC_WORD = String.raw`(?:my\s+|the\s+)?(?:pc|computer|system|laptop)`;
 const TENS = { ten: 10, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, half: 50, max: 100, maximum: 100, full: 100 };
@@ -309,7 +309,9 @@ export function pcAsk(raw, apps = []) {
   // "clip that": the last bit of your game saved (NVIDIA's Instant Replay, or the Game Bar)
   if (/\b(?:clip (?:that|it|this)|clip the last|save (?:that|a|the|the last) (?:clip|replay)|instant replay|record that|save (?:the )?replay)\b/.test(c)) return pc('clip');
 
-  const voice = discordAsk(c);
+  // your mic or your ears on Discord, even with something said first ("bro, honestly, mute my mic")
+  const tail = /\b(?:mic|mike|microphone|deafen|undeafen|discord|camera|screen|call)\b/.test(c) ? /\b((?:un)?(?:mute|deafen)\b.*|(?:turn|switch|share|stop|leave|disconnect|hang)\b.*)$/.exec(c)?.[1] : null;
+  const voice = discordAsk(c) || (tail && discordAsk(tail));
   if (voice) return pc('discord', { value: voice });
 
   // one app's own volume, the mixer's, not the PC's: "turn discord down", "mute the game", "discord to 30"
@@ -999,6 +1001,10 @@ export class Chat {
     const sorting = this.agent && this.quick;
     const hers = (c, said) => {
       const a = this.asked(c, true);
+      // "mute Discord" (its sound) read into what was about your mic or your ears: that, not its sound
+      if (a?.op === 'appVolume' && /\b(?:mic|mike|microphone|me|myself|deaf\w*|defin\w*|voice)\b/i.test(said)) {
+        return { kind: 'pc', op: 'discord', value: /deaf|defin/i.test(said) ? { button: 'deafen', want: /\bun/i.test(said) ? 'off' : 'on' } : { button: 'mute', want: a.value?.how === 'unmute' ? 'off' : 'on' } };
+      }
       return a && PC_KINDS.has(a.kind) && a.kind !== 'choice' && backedBy(a, said) ? a : null;
     };
     if (sorting && !PC_KINDS.has(plain?.kind) && !clearlyClaude(text)) {

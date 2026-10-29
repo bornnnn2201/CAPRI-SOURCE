@@ -708,6 +708,19 @@ async function boot() {
       return host.cursor();
     });
   };
+  // Over to the screen something is on (a Discord button on your other monitor: capri.strike), `rect`
+  // in her window's terms: how far her window moved ({ dx, dy }, for the rect there), or null if it's
+  // on none of your screens, or on your game's.
+  capri.toScreenOf = async (rect) => {
+    if (!screens) return null;
+    const x = screens.origin.x + rect.x + rect.w / 2;
+    const y = screens.origin.y + rect.y + rect.h / 2;
+    const there = screens.list.find((d) => x >= d.x && x < d.x + d.w && y >= d.y && y < d.y + d.h);
+    if (!there || offLimits(there.id)) return null;
+    const from = screens.origin;
+    await goToScreen(there.id);
+    return { dx: from.x - screens.origin.x, dy: from.y - screens.origin.y };
+  };
   // The pointer on another of your screens for a few seconds: she follows you there, when she's
   // free to (not in the middle of something, not asleep, not put away).
   let followOn = config.follow !== false;

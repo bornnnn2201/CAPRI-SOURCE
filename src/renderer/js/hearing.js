@@ -3,6 +3,13 @@
 // them. Only for what you said out loud (speech.js), never what you typed. Anything longer, or not
 // close enough to one of hers, is left as it was.
 
+// how Whisper writes "deafen", "me", "mic", and "on Discord" after them (kept: $1 / $2 in MISHEARD)
+const DEAF = String.raw`(?:deaf(?:en|in|and|ened|on)?|defined|defend|defen|defin|deafin|death in|death and|def in|def and|deaf in|deaf and|bethan|the fan|devon)`;
+const ME = String.raw`(?:me|may|mi|mee|mean|myself)`;
+const MIC = String.raw`(?:mic|mike|mick|mark|mac|make|meg|nick|microphone|mic phone)`;
+const ON_DC = String.raw`((?:\s+(?:on|in|onto)\s+(?:discord|this cord|the cord|discords))?)`;
+const ON_DC_REQUIRED = String.raw`(\s+(?:on|in)\s+(?:discord|this cord|the cord|discords))`;
+
 // mistakes Whisper makes again and again (from her heard\ clips): the whole thing, or a part of it
 const MISHEARD = [
   [/^(?:got|god|gone|girl|good|go to|go ahead|gonna)\s+rest$|^gore?st$|^a?rr?est$|^go (?:wrist|rust|rest up)$/, 'go rest'],
@@ -10,10 +17,11 @@ const MISHEARD = [
   [/\b(?:red|reed|read|rib|ribbed|reboot|re boot|we boot|rebooted|rebooting)\s+(?:ticks|tics|topics|optic|op ticks|optics|apt ticks)\b/, 'reboot optics'],
   [/\bsand(?:y|ie|a|e|i)?\s*(?:vista|vistan|vistin|vistan|this tan|v stan|bistan|visstan)\b/, 'sandevistan'],
   [/\bblack\s*(?:ball|wool|well|whirl|wol|walls)\b/, 'blackwall'],
-  [/^(?:un|on|and|an)\s*(?:deaf(?:en|in|and|ened)?|defend|defin|the fan)(?:\s+me)?$|^undefined(?:\s+me)?$/, 'undeafen me'],
-  [/^(?:deaf(?:en|in|and)|defend|defin|the fan|death in)\s+me$/, 'deafen me'],
-  [/^(?:on|and|an)\s*mute(?:\s+me)?$/, 'unmute me'],
-  [/^(?:mute|mutes)\s+(?:mi|mean|mee)$/, 'mute me'],
+  // Discord: "deafen me" heard as "defined me", "deaf in may", "bethan may"; "mic" as "mark", "mike"
+  [new RegExp(String.raw`^(?:un|on|and|an)\s*${DEAF}(?:\s+${ME})?${ON_DC}$|^undefined(?:\s+${ME})?${ON_DC}$`), 'undeafen me$1'],
+  [new RegExp(String.raw`^${DEAF}\s+${ME}${ON_DC}$|^${DEAF}${ON_DC_REQUIRED}$`), 'deafen me$1'],
+  [new RegExp(String.raw`^(?:on|and|an)\s*mute(?:\s+${ME})?${ON_DC}$`), 'unmute me$1'],
+  [new RegExp(String.raw`^(un)?(?:mute|mutes|mewt)\s+(?:${ME}|my\s+${MIC})${ON_DC}$`), '$1mute my mic$2'],
   [/^(?:skip|skips|skipped|kip|step|ship)\s+(?:this|the|that)\s*(?:one|song|son|sung|thing|track)?$/, 'skip this song'],
   [/^(?:game|gaming|getting|gamin|gamer)\s*(?:mode|mod|mood|mold)\s*(on|off)$/, 'gaming mode $1'],
   [/^(?:come|calm|comb|com)\s+(?:out|back)$/, 'come out'],
@@ -27,6 +35,9 @@ const COMMANDS = [
   'mute me', 'unmute me', 'deafen me', 'undeafen me', 'share my screen', 'stop sharing',
   'turn my camera on', 'turn my camera off',
 ]; // (not "leave the call": a near miss of that is too easily something else, and you'd be out of it)
+
+// what you call out before the command: "brother, mute my mic", "yo, go rest", "okay so, skip this"
+export const OPENERS = /^(?:(?:bro(?:ther)?|bruh|brah|dude|man|mate|homie|choom|yo|okay|ok|alright|right|so|please|pls|can you|could you)\s+)+/;
 
 const letters = (s) => s.replace(/[^a-z]/g, '');
 
@@ -44,7 +55,8 @@ function distance(a, b) {
 export function heardAs(text) {
   const raw = String(text || '').trim();
   const c = raw.toLowerCase().replace(/[’`]/g, "'").replace(/^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)[,.!\s]*/, '')
-    .replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    .replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(OPENERS, '').trim();
   if (!c || c.split(' ').length > 6) return raw;
   for (const [re, meant] of MISHEARD) {
     if (re.test(c)) return c.replace(re, meant);

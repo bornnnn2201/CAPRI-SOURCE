@@ -973,6 +973,8 @@ export class Capri {
   //   front   a scanline sweeps it                    open   a rift tears open where it'll come up
   //   appear  it's scanned as it arrives               button a hit ring and sparks on the button
   //   tray    sparks on the taskbar by the clock       pc     a shockwave across the whole screen
+  // She goes to it first, unless she's put away or kept off your game's screen: over to its screen
+  // if it's on another of yours, then right up beside it, and hits it from there.
   // `id`: the window's, to draw only on what of it shows. Resolves once it's landed.
   async strike(rect, how = 'button', { id = null } = {}) {
     if (!rect || reducedMotion.matches || this.dormant) return false;
@@ -980,9 +982,16 @@ export class Capri {
     const s = this.scale;
     const live = () => (id ? this.windows.wins.find((w) => w.id === id) || null : rect);
     const covers = () => (id ? this.coversOf(id) : []);
-    const at = how === 'tray' || how === 'button' || !id
-      ? { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
-      : { x: clamp(rect.x + rect.w / 2, 30, this.view.w - 30), y: clamp(rect.y + Math.min(60, rect.h / 3), 20, this.view.h - 20) };
+    if (how !== 'pc' && !this.stowed && !this.hidden && !this.lowPower && !this.dragging) {
+      const mid = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+      if (mid.x < 0 || mid.y < 0 || mid.x > this.view.w || mid.y > this.view.h) {
+        const moved = await this.toScreenOf?.(rect).catch(() => null);
+        if (moved) rect = { ...rect, x: rect.x + moved.dx, y: rect.y + moved.dy };
+        if (id) rect = live() || rect; // the window, in her window's terms over there
+      }
+      await this.goBeside(this.hitPoint(rect, how, id));
+    }
+    const at = this.hitPoint(rect, how, id);
     // her hand if she's free to use it, else straight out of her chip (or off her, mid-act)
     const zapped = !this.stowed && !this.hidden && this.zap(at.x, at.y);
     if (zapped) await sleep(140); // the arm's out on the 'zap' drawing (acting.js)
@@ -1028,6 +1037,22 @@ export class Capri {
         break;
     }
     return true;
+  }
+
+  // Where a strike lands: a button's or the tray's middle, a window's title bar.
+  hitPoint(rect, how, id) {
+    if (how === 'tray' || how === 'button' || !id) return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+    return { x: clamp(rect.x + rect.w / 2, 30, this.view.w - 30), y: clamp(rect.y + Math.min(60, rect.h / 3), 20, this.view.h - 20) };
+  }
+
+  // Right up beside a point she's about to hit (strike): close enough to touch it, on the side with
+  // room, in her column of light. Not if she's already there, or busy with something else.
+  async goBeside(at) {
+    if (this.busy || this.act || at.x < 0 || at.y < 0 || at.x > this.view.w || at.y > this.view.h) return;
+    const spot = this.spotNear({ x: at.x - 18, y: at.y - 18, w: 36, h: 36 }, { reach: 120 * this.scale + 40 });
+    if (this.stance === 'stand' && Math.hypot(spot.x - this.pos.x, spot.y - this.pos.y) < 110) return;
+    await this.teleport({ x: spot.x, y: spot.y }, { face: spot.face });
+    for (let i = 0; i < 10 && (this.act || this.busy); i++) await sleep(50);
   }
 
   zap(x, y) {
@@ -1812,11 +1837,11 @@ export class Capri {
 
   // Where to stand to point at `rect`: beside it, on the side with more room, her shoulder a bit
   // below its middle (on the floor for things low on the screen).
-  spotNear(rect) {
+  spotNear(rect, { reach = 230 * this.scale + 90 } = {}) {
     const s = this.scale;
     const { w, h } = this.view;
     const side = 150 * s + 30;
-    const reach = 230 * s + 90; // from her feet to what she points at: room for the arm to shoot out
+    // `reach`: from her feet to what she points at (room for the arm to shoot out), less to touch it
     const roomLeft = rect.x, roomRight = w - (rect.x + rect.w);
     let x;
     if (Math.max(roomLeft, roomRight) >= side + 40) {
