@@ -247,15 +247,16 @@ public static class CapriWindows {
   // The window she sits on, on its own thread so a snapshot never holds it up. While it's being
   // dragged it's read once per screen refresh, right after Windows draws the screen (in step with
   // it: on a timer of its own, some refreshes got no news and she stuttered), and goes to her page.
-  // But her page takes ~6-8 of her screen's refreshes to get a drawing of her on it (Electron, a
-  // see-through window, measured at 165 Hz), and she trailed the window by that much. So her whole
-  // window is moved too, by Windows, which shows it a refresh or two later: by as far as the window
-  // went in the time her page hasn't caught up with, plus those refreshes at its speed. She's drawn
+  // But her page takes ~2.5 of her screen's refreshes to get a drawing of her on it (Electron, a
+  // see-through window, filmed at 165 Hz; far more with the graphics card's frame cap for apps in
+  // the background on, which her window always is), and she trailed the window by that. So her whole
+  // window is moved too, by Windows, which shows it a refresh later: by as far as the window went in
+  // the time her page hasn't caught up with, plus that refresh at its speed. She's drawn
   // on the window, and her window drifts back home as her page catches up once it stops, with
   // nothing to jump. Counted in refreshes of the screen she's on, whatever its rate (60, 165 Hz...).
   // (CAPRI_DRAWN / CAPRI_MOVED: other counts, to measure with.)
   static int seatMoved = 0;
-  static double DRAWN = 8, MOVED = 2;
+  static double DRAWN = 2.5, MOVED = 1;
   static void Ride(System.IO.TextWriter output, IntPtr self) {
     double d;
     if (double.TryParse(Environment.GetEnvironmentVariable("CAPRI_DRAWN") ?? "", System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d)) DRAWN = d;
