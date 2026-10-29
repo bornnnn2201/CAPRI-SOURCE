@@ -192,8 +192,8 @@ public static class CapriWindows {
   // The watch itself, all in here (a PowerShell loop costs more than the looking does): a snapshot
   // every 150 ms while things change, every 300 ms once nothing has for a few seconds. Stops with
   // Capri, even if she crashed without telling us.
-  // The window she sits on (Capri says which on stdin, 0 = none): its edge is read ~64 times a
-  // second, so she rides a window you drag instead of hopping after it. One DWM call a look.
+  // The window she sits on (Capri says which on stdin, 0 = none): its edge is read once per
+  // screen refresh while it moves (Ride), so she rides a window you drag instead of hopping after it.
   static long seat = 0;
   static void Listen() {
     var t = new System.Threading.Thread(() => {
@@ -211,9 +211,10 @@ public static class CapriWindows {
 
   public static void Run(long self, int parent) {
     Listen();
-    string last = "", seatLast = "";
+    string last = "";
     int still = 0, tick = 0;
     var output = Console.Out;
+    Ride(output);
     var clock = System.Diagnostics.Stopwatch.StartNew();
     long next = 0;
     while (true) {
@@ -221,8 +222,7 @@ public static class CapriWindows {
       if (now >= next) {
         string snap = Snapshot(self);
         if (snap != last) {
-          output.WriteLine(snap);
-          output.Flush();
+          lock (output) { output.WriteLine(snap); output.Flush(); }
           last = snap;
           still = 0;
         } else if (still < 1000) {
@@ -233,25 +233,93 @@ public static class CapriWindows {
         }
         next = now + (still > 20 ? 300 : 150);
       }
-      long id = System.Threading.Interlocked.Read(ref seat);
-      if (id == 0) {
-        seatLast = "";
-        System.Threading.Thread.Sleep((int)Math.Max(1, next - clock.ElapsedMilliseconds));
-        continue;
-      }
-      RECT r;
-      if (DwmGetWindowAttribute(new IntPtr(id), DWMWA_EXTENDED_FRAME_BOUNDS, out r, 16) == 0) {
-        string s = "{\"seat\":" + id + ",\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"w\":" + (r.Right - r.Left) + ",\"h\":" + (r.Bottom - r.Top) + "}";
-        if (s != seatLast) {
-          if (seatLast != "") { output.WriteLine(s); output.Flush(); still = 0; moved = clock.ElapsedMilliseconds; } // the first look is the snapshot's
-          seatLast = s;
-        }
-      }
-      // being dragged: every 8 ms; sitting still: every 50 ms, just to notice it start
-      Wait(clock.ElapsedMilliseconds - moved < 600 ? 8 : 50);
+      if (System.Threading.Interlocked.Exchange(ref seatMoved, 0) != 0) still = 0;
+      System.Threading.Thread.Sleep((int)Math.Max(1, next - clock.ElapsedMilliseconds));
     }
   }
-  static long moved = -10000;
+
+  // The window she sits on, on its own thread so a snapshot never holds it up. While it's being
+  // dragged it's read once per screen refresh, right after Windows draws the screen (in step with
+  // it: on a timer of its own, some refreshes got no news and she stuttered), and she's put where
+  // it will be by the time her own drawing reaches the screen, ~2 refreshes later, from how fast
+  // it's going: on the window, not trailing it.
+  static int seatMoved = 0;
+  static void Ride(System.IO.TextWriter output) {
+    var t = new System.Threading.Thread(() => {
+      var clock = System.Diagnostics.Stopwatch.StartNew();
+      string last = "";
+      long lastId = 0;
+      double px = 0, py = 0, pt = 0, vx = 0, vy = 0, frame = 1000.0 / 60, lastMove = -10000;
+      int idle = 0;
+      while (true) {
+        long id = System.Threading.Interlocked.Read(ref seat);
+        if (id == 0) { lastId = 0; Wait(50); continue; }
+        var h = new IntPtr(id);
+        bool fast = clock.Elapsed.TotalMilliseconds - lastMove < 400 || Dragged(h);
+        if (fast) {
+          double before = clock.Elapsed.TotalMilliseconds;
+          if (!Refresh()) Wait(4);
+          double gap = clock.Elapsed.TotalMilliseconds - before;
+          if (gap > 2 && gap < 40) frame = frame * 0.9 + gap * 0.1; // how long a refresh is on this screen
+        } else {
+          Wait(30); // sitting still: just to notice it start
+        }
+        RECT r;
+        if (DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out r, 16) != 0) continue;
+        double now = clock.Elapsed.TotalMilliseconds;
+        if (id != lastId) { lastId = id; last = ""; px = r.Left; py = r.Top; pt = now; vx = vy = 0; idle = 2; }
+        double dt = Math.Max(1, now - pt);
+        if (r.Left != px || r.Top != py) {
+          vx = vx * 0.4 + (r.Left - px) / dt * 0.6; // px per ms
+          vy = vy * 0.4 + (r.Top - py) / dt * 0.6;
+          idle = 0;
+          lastMove = now;
+        } else if (++idle >= 2) {
+          vx = vy = 0; // stopped: back onto where it really is
+        } else {
+          vx *= 0.5; vy *= 0.5; // a refresh the window missed, or it's stopping
+        }
+        px = r.Left; py = r.Top; pt = now;
+        double lead = Math.Min(40, frame * 2.2);
+        int lx = (int)Math.Round(Math.Max(-160, Math.Min(160, vx * lead)));
+        int ly = (int)Math.Round(Math.Max(-160, Math.Min(160, vy * lead)));
+        string s = "{\"seat\":" + id + ",\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"w\":" + (r.Right - r.Left) + ",\"h\":" + (r.Bottom - r.Top) + ",\"lx\":" + lx + ",\"ly\":" + ly + "}";
+        if (s == last) continue;
+        bool first = last == "";
+        last = s;
+        if (first) continue; // the first look is the snapshot's
+        lock (output) { output.WriteLine(s); output.Flush(); }
+        System.Threading.Interlocked.Exchange(ref seatMoved, 1);
+      }
+    });
+    t.IsBackground = true;
+    t.Priority = System.Threading.ThreadPriority.AboveNormal;
+    t.Start();
+  }
+
+  // Waits for the screen's next refresh (Windows 11's compositor clock). False where there's none.
+  [DllImport("dcomp.dll")] static extern uint DCompositionWaitForCompositorClock(uint count, IntPtr handles, uint timeoutMs);
+  static bool noClock = false;
+  static bool Refresh() {
+    if (noClock) return false;
+    try { DCompositionWaitForCompositorClock(0, IntPtr.Zero, 50); return true; }
+    catch (EntryPointNotFoundException) { noClock = true; } catch (DllNotFoundException) { noClock = true; }
+    return false;
+  }
+
+  // Is the window being dragged (or resized) right now? Its thread is in Windows' move loop: she
+  // starts riding on its first step, not after it.
+  [StructLayout(LayoutKind.Sequential)]
+  struct GUITHREADINFO { public int cbSize, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT caretRect; }
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+  static bool Dragged(IntPtr h) {
+    uint pid;
+    uint tid = GetWindowThreadProcessId(h, out pid);
+    if (tid == 0) return false;
+    var info = new GUITHREADINFO();
+    info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+    return GetGUIThreadInfo(tid, ref info) && (info.flags & 2) != 0; // GUI_INMOVESIZE
+  }
 
   // A precise wait without raising Windows' timer for everyone (Sleep only wakes every 15.6 ms here).
   [DllImport("kernel32.dll")] static extern IntPtr CreateWaitableTimerExW(IntPtr attrs, IntPtr name, uint flags, uint access);

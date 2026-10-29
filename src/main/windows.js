@@ -74,7 +74,11 @@ function startWindowWatch({ overlay, onUpdate, onSeat }) {
         const w = last?.wins.find((x) => x.id === data.seat);
         if (!w || overlay.isDestroyed()) return;
         Object.assign(w, { x: data.x, y: data.y, w: data.w, h: data.h });
-        onSeat?.(toOverlay(w, overlay.getBounds()));
+        // `lx`, `ly`: how far on from there it'll be once she's drawn (it's moving), in her pixels too
+        const bounds = overlay.getBounds();
+        const at = toOverlay(w, bounds);
+        const ahead = toOverlay({ ...w, x: w.x + (data.lx || 0), y: w.y + (data.ly || 0) }, bounds);
+        onSeat?.({ ...at, lx: ahead.x - at.x, ly: ahead.y - at.y });
         return;
       }
       last = data;
