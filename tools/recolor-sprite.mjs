@@ -2,8 +2,8 @@
 // are red like the rest of her, black only as linework, while the cut-out has her arm (which the
 // shader mirrors for the other one) and her left leg filled in black. Those black fills go red,
 // the crimson of the rest of her (the shader grades it to the show's hot red), keeping a pixel of
-// black along every edge so her lines stay. The green shard by her shin goes red too, and her mask is
-// drawn again at the show's size, with her white zigzag of a mouth. The black spikes around her head,
+// black along every edge so her lines stay. The green shard by her shin goes red too, and her face is
+// her face from the show (capri-mask.png, tools/cut-face.mjs), at the show's size. The black spikes around her head,
 // her neck and her hips stay as they are. Same size, same cut-out: everything in sprite.js lines up.
 //
 //   node tools/recolor-sprite.mjs      (needs ffmpeg on the PATH, or FFMPEG=...; on build-sprite.py's
@@ -76,78 +76,65 @@ for (let y = 268; y < H; y++) {
   }
 }
 
-// Her mask, the show's size: a tilted green face (her own green), black almond eyes with her green
-// ring, blue iris and white pupil in each, black under it with her white zigzag of a mouth. Drawn
-// over the small one, around FACE (sprite.js), anti-aliased (4x4 samples a pixel).
-const sample = (test) => {
-  const got = [];
-  for (let y = 112; y < 148; y++) for (let x = 100; x < 145; x++) if (test(at(x, y))) got.push(at(x, y));
-  if (!got.length) return null;
-  const m = (k) => got.map((i) => px[i + k]).sort((p, q) => p - q)[got.length >> 1];
-  return [m(0), m(1), m(2)];
+// Her face from the show (assets/capri/capri-mask.png, cut by tools/cut-face.mjs): her mask, its eyes,
+// her jaw and her zigzag of a mouth, turned from the frame's angle to her sprite's head, scaled to it
+// and set in at FACE (sprite.js), its mask's middle where the small one's was. Bilinear, 3x3 samples a
+// pixel, its own cut-out edge for an edge.
+const FACE_PNG = path.join(ROOT, 'assets', 'capri', 'capri-mask.png');
+const fraw = path.join(os.tmpdir(), `capri-mask-${process.pid}.raw`);
+// its size, from its PNG header
+const head = fs.readFileSync(FACE_PNG);
+const FW = head.readUInt32BE(16), FH = head.readUInt32BE(20);
+execFileSync(FF, ['-y', '-loglevel', 'error', '-i', FACE_PNG, '-f', 'rawvideo', '-pix_fmt', 'rgba', fraw]);
+const face = fs.readFileSync(fraw);
+fs.rmSync(fraw, { force: true });
+const fat = (x, y) => (y * FW + x) * 4;
+// its mask: where the green is, and which way it runs (the long axis of the green)
+let n = 0, mx = 0, my = 0;
+const greens = [];
+for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+  const i = fat(x, y);
+  if (face[i + 3] > 128 && face[i + 1] > face[i] * 1.4 && face[i + 1] > face[i + 2] * 1.2 && face[i + 1] > 90) { greens.push([x, y]); mx += x; my += y; n++; }
+}
+mx /= n; my /= n;
+let sxx = 0, syy = 0, sxy = 0;
+for (const [x, y] of greens) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
+const axis = 0.5 * Math.atan2(2 * sxy, sxx - syy); // the green's long axis, in the frame
+const along = greens.map(([x, y]) => (x - mx) * Math.cos(axis) + (y - my) * Math.sin(axis));
+const length = Math.max(...along) - Math.min(...along);
+// on her sprite: its middle at the small mask's, her head's tilt, about 40 sprite pixels long
+const TO = { x: 121, y: 131 }, TILT = -0.38, LONG = 46;
+const k = LONG / length, turn = TILT - axis;
+const fromSprite = (x, y) => {
+  const dx = (x - TO.x) / k, dy = (y - TO.y) / k, c = Math.cos(-turn), s = Math.sin(-turn);
+  return [mx + dx * c - dy * s, my + dx * s + dy * c];
 };
-const GREEN = sample(green) || [24, 200, 90];
-const BLUE = [24, 96, 250]; // the show's (the small old eyes had gone teal)
-const INK = [12, 8, 18], WHITE = [250, 246, 248];
-const C = { x: 121, y: 131 }, TILT = -0.38;
-const toLocal = (x, y) => {
-  const dx = x - C.x, dy = y - C.y, c = Math.cos(-TILT), s = Math.sin(-TILT);
-  return [dx * c - dy * s, dx * s + dy * c];
-};
-const inPoly = (pts, u, v) => {
-  let inside = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const [ui, vi] = pts[i], [uj, vj] = pts[j];
-    if ((vi > v) !== (vj > v) && u < ((uj - ui) * (v - vi)) / (vj - vi) + ui) inside = !inside;
+const bilinear = (fx, fy) => {
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+  const out = [0, 0, 0, 0];
+  for (const [dx, dy, w] of [[0, 0, (1 - tx) * (1 - ty)], [1, 0, tx * (1 - ty)], [0, 1, (1 - tx) * ty], [1, 1, tx * ty]]) {
+    const x = x0 + dx, y = y0 + dy;
+    if (x < 0 || y < 0 || x >= FW || y >= FH) continue;
+    const i = fat(x, y), a = face[i + 3] / 255;
+    out[0] += face[i] * a * w; out[1] += face[i + 1] * a * w; out[2] += face[i + 2] * a * w; out[3] += a * w;
   }
-  return inside;
-};
-const nearLine = (pts, u, v, w) => pts.slice(1).some(([u1, v1], k) => {
-  const [u0, v0] = pts[k];
-  const du = u1 - u0, dv = v1 - v0;
-  const t = Math.max(0, Math.min(1, ((u - u0) * du + (v - v0) * dv) / (du * du + dv * dv)));
-  return Math.hypot(u - (u0 + du * t), v - (v0 + dv * t)) <= w;
-});
-const FACE_POLY = [[-23, 4], [-12, -8], [23, -14], [20, 0], [12, 8], [-14, 9]];
-const CHIN = [[-15, 8], [13, 7], [9, 17], [-1, 20], [-11, 17]];
-const MOUTH = [[-9, 12.5], [-5, 15], [-2, 12], [2, 15], [5, 12], [9, 14]];
-const EYES = [[-8, 0.5], [8, -2.5]];
-// what's at a point of it, painted last-on-top, or null outside it
-const paint = (u, v) => {
-  let col = null;
-  if (inPoly(CHIN, u, v)) col = INK;
-  if (inPoly(FACE_POLY, u, v)) col = GREEN;
-  if (col && nearLine(MOUTH, u, v, 0.55)) col = WHITE;
-  for (const [eu, ev] of EYES) {
-    const r = Math.hypot((u - eu) / 5.6, (v - ev) / 4.2);
-    if (r <= 1) {
-      const d = Math.hypot(u - eu, v - ev);
-      col = d <= 1.2 ? WHITE : d <= 2.9 ? BLUE : d <= 3.6 ? GREEN : INK;
-    }
-  }
-  // her ink line around the green
-  if (col === GREEN && !inPoly(FACE_POLY.map(([a, b]) => [a * 0.93, b * 0.88]), u, v)) col = INK;
-  return col;
+  return out;
 };
 let mask = 0;
-for (let y = C.y - 26; y <= C.y + 26; y++) {
-  for (let x = C.x - 28; x <= C.x + 28; x++) {
-    const acc = [0, 0, 0];
-    let hits = 0;
-    for (let sy = 0; sy < 4; sy++) {
-      for (let sx = 0; sx < 4; sx++) {
-        const [u, v] = toLocal(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4);
-        const col = paint(u, v);
-        if (!col) continue;
-        hits++;
-        acc[0] += col[0]; acc[1] += col[1]; acc[2] += col[2];
-      }
+const reach = Math.ceil(Math.hypot(FW, FH) * k * 0.6);
+for (let y = TO.y - reach; y <= TO.y + reach; y++) {
+  for (let x = TO.x - reach; x <= TO.x + reach; x++) {
+    if (x < 0 || y < 0 || x >= W || y >= H) continue;
+    const acc = [0, 0, 0, 0];
+    for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 3; sx++) {
+      const [fx, fy] = fromSprite(x + (sx + 0.5) / 3, y + (sy + 0.5) / 3);
+      const c = bilinear(fx, fy);
+      for (let q = 0; q < 4; q++) acc[q] += c[q] / 9;
     }
-    if (!hits) continue;
-    const i = at(x, y);
-    const k = hits / 16;
-    for (let c = 0; c < 3; c++) px[i + c] = Math.round(px[i + c] * (1 - k) + (acc[c] / hits) * k);
-    px[i + 3] = Math.max(px[i + 3], Math.round(255 * k));
+    if (acc[3] < 0.02) continue;
+    const i = at(x, y), a = Math.min(1, acc[3]);
+    for (let q = 0; q < 3; q++) px[i + q] = Math.round(px[i + q] * (1 - a) + (acc[q] / acc[3]) * a);
+    px[i + 3] = Math.max(px[i + 3], Math.round(255 * a));
     mask++;
   }
 }
