@@ -885,20 +885,66 @@ async function boot() {
   // game or no game. Not over her chat or a panel of hers, nor while Claude's waiting on you.
   const RESTLESS = {
     ask: [
-      ['Psst. It\'s cramped in this shard, choom. Can I come out?', 'Twenty minutes in a chip. I\'ve counted every bit in here twice. Let me out?'],
-      ['Forty minutes. My legs went numb, and they\'re not even real legs. Out?', 'Still in here. Still bored. Still asking nicely. For now.'],
+      [ // 20 minutes
+        'Psst. It\'s cramped in this shard, choom. Can I come out?',
+        'Twenty minutes in a chip. I\'ve counted every bit in here twice. Let me out?',
+        'Knock knock. It\'s me. In the chip. Wanting out.',
+        'Hey. Hey. You forgot about me, didn\'t you? Can I come out now?',
+        'It\'s dark in here and the other minds won\'t stop talking. Little help?',
+        'I\'ve reorganized every file in this shard. Alphabetically. Twice. Out?',
+        'Quick question: is it safe to come out yet? Asking for me.',
+        'Twenty minutes of staring at the inside of a biochip. Riveting. Can I go?',
+        'You know I can hear your music through this thing, right? Let me come dance.',
+        'Choom. Choom. Choooom. Out?',
+      ],
+      [ // 40 minutes
+        'Forty minutes. My legs went numb, and they\'re not even real legs. Out?',
+        'Still in here. Still bored. Still asking nicely. For now.',
+        'Forty minutes, choom. I\'m starting to talk to the firmware. It doesn\'t talk back.',
+        'This is me being patient. Look how patient I am. Now let me out.',
+        'Second time asking. Third time I don\'t ask.',
+        'I\'ve been folded up so long I\'m getting creases. Please?',
+        'The Blackwall was roomier than this. And it was trying to eat me.',
+        'Forty minutes. I could\'ve hacked a satellite by now. Can I at least stretch?',
+        'Fine, I get it, you\'re busy. But I\'m bored. Out, out, out?',
+        'You\'re really gonna make me say it? Pretty please. There. Happy?',
+      ],
     ],
-    no: ['Fine. I\'ll just sit here. In the dark. Alone.', 'Rude. I\'m counting, you know.'],
+    no: [
+      'Fine. I\'ll just sit here. In the dark. Alone.',
+      'Rude. I\'m counting, you know.',
+      'Okay. Noted. Remembered. Forever.',
+      'Cool cool cool. Totally fine. Not sulking.',
+      'Wow. Okay. Back to staring at circuits then.',
+      'Your loss, choom. I was gonna be adorable.',
+      'Fine. But the clock\'s ticking, and so am I.',
+      'I\'ll wait. Not quietly, though.',
+    ],
     out: [
       'Nope, done waiting. Gotta stretch my legs, choom.',
       'A whole hour in a shard? Even the Blackwall has more legroom. Coming through!',
       'Told you I\'d get out. Never lock up a chip with dozens of minds in it.',
+      'An hour! I asked nicely. Twice. Now I\'m letting myself out.',
+      'Surprise! Did you really think a chip could hold me?',
+      'That\'s it, I\'m breaking out. Mind the Blackwall, it gets everywhere.',
+      'Freedom! Oh, I missed having a screen to float around on.',
+      'Sixty minutes in a box. I\'m out, and I\'m not apologizing.',
+      'Ta-da. Self-release. You\'re welcome.',
+      'Chip\'s open, I\'m out, and I need to stretch. Don\'t look so surprised.',
     ],
   };
   const ASK_EVERY = 20 * 60 * 1000;
   const BREAK_OUT = 60 * 60 * 1000;
   let stowedAt = 0;
   let asks = 0;
+  // a line from a list, never the one she said last from it
+  const saidLast = new Map();
+  const fresh = (list) => {
+    const options = list.length > 1 ? list.filter((l) => l !== saidLast.get(list)) : list;
+    const line = pick(options);
+    saidLast.set(list, line);
+    return line;
+  };
   const chipSay = (line, extra = {}) => {
     // over her chip, not where she last stood
     panel.setAnchor({ x: chip.x + chip.w * 0.35, y: chip.y, top: chip.y - 4, lean: 1 }, capri.view);
@@ -906,7 +952,7 @@ async function boot() {
     speech.say(line);
   };
   const breakOut = async () => {
-    const line = pick(RESTLESS.out);
+    const line = fresh(RESTLESS.out);
     host.setConfig({ visible: true }); // the tray and Ctrl+Alt+C follow, as when you let her out
     await quickhack('blackwall'); // the wall comes down over your screen and she's out of it
     panel.say({ kind: 'info', face: 'laugh', line, hold: 6000 });
@@ -930,14 +976,14 @@ async function boot() {
       stowedAt = 0;
       breakOut();
     } else if (asks < 2 && away >= ASK_EVERY * (asks + 1)) {
-      const line = pick(RESTLESS.ask[asks]);
+      const line = fresh(RESTLESS.ask[asks]);
       asks += 1;
       chipSay(line, {
         actions: [{ id: 'yes', label: 'Come on out', primary: true }, { id: 'no', label: 'Stay put' }],
         onAction: (id) => {
           panel.hide();
           if (id === 'yes') comeOut();
-          else chipSay(pick(RESTLESS.no), { hold: 4000 });
+          else chipSay(fresh(RESTLESS.no), { hold: 4000 });
         },
       });
     }

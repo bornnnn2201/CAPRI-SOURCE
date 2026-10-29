@@ -655,6 +655,213 @@ export const ACTS = {
     ],
   },
 
+  // shadowboxing: a couple of quick jabs at nothing, one arm then the other shooting out on ones,
+  // a hop back between, and a smug little bounce at the end
+  jab: {
+    priority: 1,
+    fps: 24,
+    directional: true,
+    keys: [
+      [3, { head: 0.08, tilt: -2, armL: -0.2, armR: -0.2, bob: 2, sy: 0.95, sx: 1.03 }],
+      [1, { head: 0.14, tilt: 4, reach: 1, long: 1.45, smear: [-10, 0], mane: 0.18 }, 'jab'],
+      [3, { head: 0.14, tilt: 3, reach: 0.95, long: 1.35, mane: 0.14 }],
+      [2, { head: 0.08, tilt: 0, reach: 0.1, bob: -2 }],
+      [1, { head: 0.12, tilt: 4, armL: 0.9, armR: 0.9, longL: 1.4, longR: 1.4, smear: [-10, 0], mane: 0.2 }, 'jab'],
+      [3, { head: 0.12, tilt: 3, armL: 0.85, armR: 0.85, longL: 1.3, longR: 1.3, mane: 0.16 }],
+      [2, { head: 0.06, tilt: -1, arms: -0.1, bob: -4 }],
+      [2, { head: 0.1, mane: 0.12, bob: -8, sy: 1.04, sx: 0.97 }],
+      [2, { head: 0.08, mane: 0.06, bob: 2, sy: 0.94, sx: 1.04 }],
+      [4, { head: 0.1, mane: 0.08 }],
+      [1, {}],
+    ],
+  },
+
+  // a glitch: she stutters out of sync for a few drawings, her copies jerking off to the sides,
+  // a column or two slipping, and she's back like nothing happened
+  glitch: {
+    priority: 1,
+    fps: 24,
+    keys: [
+      [1, { echo: [14, 0], phase: 0.12, sx: 1.04 }, 'glitch'],
+      [2, { echo: [-8, 2], head: 0.1, wall: 0.2 }],
+      [1, { echo: [20, -3], phase: 0.2, sx: 0.96, bob: -3 }],
+      [2, {}],
+      [1, { echo: [-16, 0], phase: 0.1, head: -0.1, wall: 0.25 }, 'glitch'],
+      [1, { echo: [6, 0], sx: 1.03 }],
+      [6, { head: 0.04 }],
+      [1, {}],
+    ],
+  },
+
+  // leaning right in to look at something on your screen, squinting, holding it, then backing off
+  peer: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { head: 0.08, tilt: 2 }],
+      [3, { head: 0.2, tilt: 6, bob: 3, mane: 0.06, arms: -0.1 }],
+      [14, { head: 0.24, tilt: 8, bob: 4, mane: 0.08, arms: -0.14 }],
+      [1, { head: 0.28, tilt: 8.5, bob: 4, mane: 0.16 }, 'notice'],
+      [8, { head: 0.24, tilt: 8, bob: 4, mane: 0.1, arms: -0.14 }],
+      [2, { head: 0.1, tilt: 3, bob: 1 }],
+      [1, {}],
+    ],
+  },
+
+  // happy little bounces in the air, three of them, the mane flipping up each time
+  bounce: {
+    priority: 1,
+    fps: 24,
+    keys: [
+      ...rep(3, [
+        [2, { sy: 0.92, sx: 1.05, bob: 3, arms: -0.15, mane: -0.04 }],
+        [1, { sy: 1.08, sx: 0.95, bob: -6, arms: 0.2, smear: [0, 8] }],
+        [3, { bob: -16, arms: 0.3, mane: 0.18, head: 0.04 }],
+        [2, { sy: 1.04, bob: -8, arms: 0.15, mane: 0.1 }],
+      ]),
+      [2, { sy: 0.9, sx: 1.06, bob: 3, arms: -0.1 }],
+      [2, { bob: 1 }],
+      [1, {}],
+    ],
+  },
+
+  // zero-g: she lets herself drift up, arms floating out, the mane going weightless, and sinks back
+  drift: {
+    priority: 1,
+    keys: [
+      [3, { bob: -3, arms: 0.1, hair: 0 }],
+      [3, { bob: -9, arms: 0.22, mane: 0.08, hair: 0 }],
+      [4, { bob: -16, arms: 0.32, mane: 0.14, head: -0.05, hair: 1 }],
+      [8, { bob: -20, arms: 0.36, mane: 0.18, head: -0.08, hair: 2 }],
+      [4, { bob: -18, arms: 0.3, mane: 0.16, head: -0.06, hair: 0 }],
+      [3, { bob: -11, arms: 0.18, mane: 0.1, hair: -1 }],
+      [3, { bob: -4, arms: 0.06, mane: 0.04 }],
+      [2, { bob: 1, sy: 0.97, sx: 1.02 }],
+      [1, {}],
+    ],
+  },
+
+  // fixing her mane: a hand up to it, a flick that flares it out, smoothed down, a satisfied tilt
+  preen: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { reach: 0.5, long: 0.85, head: -0.04 }],
+      [3, { reach: 1.05, long: 0.7, head: -0.1, mane: 0.04 }],
+      [1, { reach: 1.15, long: 0.75, head: -0.14, mane: 0.36, smear: [8, -4] }, 'dust'],
+      [4, { reach: 1.1, long: 0.72, head: -0.12, mane: 0.3 }],
+      [3, { reach: 0.95, long: 0.7, head: -0.08, mane: 0.12 }],
+      [2, { reach: 0.4, head: 0.04, mane: 0.04 }],
+      [6, { head: 0.1, tilt: 1.5 }],
+      [1, {}],
+    ],
+  },
+
+  // a shrug at nothing in particular: shoulders (arms) up, head to one side, held, and dropped
+  shrug: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { arms: -0.08, bob: 1 }],
+      [2, { arms: 0.28, bob: -3, head: 0.1, mane: 0.06 }],
+      [8, { arms: 0.34, bob: -4, head: 0.14, mane: 0.08, tilt: 1 }],
+      [2, { arms: 0.08, bob: -1, head: 0.06 }],
+      [2, { arms: -0.12, bob: 2 }],
+      [1, {}],
+    ],
+  },
+
+  // dancing to something only she hears: hips (tilt) one way, the other arm up, on the beat
+  dance: {
+    priority: 1,
+    keys: [
+      ...rep(3, [
+        [3, { tilt: -3, head: 0.08, hair: -3, armL: 0.7, armR: -0.2, bob: -2 }],
+        [1, { tilt: 0, head: 0, bob: 1, sy: 0.96, sx: 1.03 }],
+        [3, { tilt: 3, head: -0.08, hair: 3, armL: -0.2, armR: 0.7, bob: -2 }],
+        [1, { tilt: 0, head: 0, bob: 1, sy: 0.96, sx: 1.03 }],
+      ]),
+      [2, { arms: 0.5, bob: -6, mane: 0.2 }],
+      [3, { arms: 0.1, bob: 0 }],
+      [1, {}],
+    ],
+  },
+
+  // nodding off on her feet: the head sinks, sinks a bit more, she jerks awake and shakes it off
+  nod: {
+    priority: 1,
+    keys: [
+      [4, { head: 0.08, mane: -0.06, bob: 1, arms: -0.1 }],
+      [8, { head: 0.18, mane: -0.12, bob: 3, arms: -0.2 }],
+      [6, { head: 0.24, mane: -0.16, bob: 5, arms: -0.26 }],
+      [1, { head: 0.02, mane: 0.24, bob: -3, arms: 0.2, smear: [0, 10] }, 'snap'],
+      [2, { head: -0.12, mane: 0.2 }],
+      [2, { head: 0.12, mane: 0.16 }],
+      [3, { head: 0, mane: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // over her shoulder: something behind her? a quick look back, a beat, and a look back at you
+  behind: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [1, { head: 0.04 }],
+      [1, { head: -0.16, tilt: -2, smear: [10, 0], mane: 0.1 }],
+      [10, { head: -0.24, tilt: -3, mane: 0.08, armL: -0.12, armR: -0.12 }],
+      [1, { head: -0.28, tilt: -3.5, mane: 0.14 }, 'notice'],
+      [5, { head: -0.24, tilt: -3, mane: 0.08 }],
+      [1, { head: 0.04, tilt: 0, smear: [-10, 0] }],
+      [4, { head: 0.1 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: swinging her legs hard, both going, like a kid on a wall
+  swing: {
+    priority: 1,
+    keys: [
+      ...rep(3, [
+        [2, { kickL: 0.5, kickR: -0.08, hair: -2, arms: -0.42, bob: -1 }],
+        [2, { kickL: 0.14, kickR: 0.14, arms: -0.42 }],
+        [2, { kickL: -0.08, kickR: 0.5, hair: 2, arms: -0.42, bob: -1 }],
+        [2, { kickL: 0.14, kickR: 0.14, arms: -0.42 }],
+      ]),
+      [6, { kickL: 0.06, kickR: 0.06, head: 0.08, arms: -0.4 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: leaning back on her hands, head tipped up, legs out, taking it easy for a bit
+  lounge: {
+    priority: 1,
+    keys: [
+      [3, { tilt: -2, arms: -0.55, head: -0.04, kickL: 0.12, kickR: 0.12 }],
+      [3, { tilt: -4, arms: -0.7, head: -0.1, kickL: 0.22, kickR: 0.2, mane: -0.04 }],
+      [18, { tilt: -5, arms: -0.74, head: -0.14, kickL: 0.26, kickR: 0.24, mane: -0.06 }],
+      [1, { tilt: -5, arms: -0.74, head: -0.12, kickL: 0.34, kickR: 0.2 }],
+      [8, { tilt: -5, arms: -0.74, head: -0.14, kickL: 0.26, kickR: 0.24, mane: -0.06 }],
+      [3, { tilt: -2, arms: -0.5, head: -0.04, kickL: 0.1, kickR: 0.1 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: peering down past her knees at whatever's in the window under her
+  below: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { head: 0.1, tilt: 2, arms: -0.45 }],
+      [3, { head: 0.26, tilt: 5, bob: 2, arms: -0.5, kickL: 0.04, kickR: 0.04 }],
+      [12, { head: 0.3, tilt: 6, bob: 3, arms: -0.52, mane: 0.06, kickL: 0.02, kickR: 0.02 }],
+      [1, { head: 0.34, tilt: 6.5, bob: 3, mane: 0.14, arms: -0.52 }, 'notice'],
+      [6, { head: 0.3, tilt: 6, bob: 3, arms: -0.52, mane: 0.08 }],
+      [3, { head: 0.1, tilt: 2, arms: -0.44 }],
+      [1, {}],
+    ],
+  },
+
   // ---- jealous (bond.js) ----
 
   // glaring at you over another AI: she snaps to it, leans in, mane bristling, holds it, and hisses

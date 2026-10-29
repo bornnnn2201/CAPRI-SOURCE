@@ -557,7 +557,7 @@ export class Capri {
 
     // little things she does with herself while nothing's going on, between wandering off
     if (now > this.nextIdle) {
-      this.nextIdle = now + rand(14000, 32000);
+      this.nextIdle = now + rand(10000, 24000);
       if (this.mode === 'idle' && !this.act && !this.pointing && ['stand', 'sit'].includes(this.stance) && !reducedMotion.matches) this.idle(now);
     }
     if (now > this.nextSurge) {
@@ -618,7 +618,7 @@ export class Capri {
     if (this.stance === 'sit' && this.perch?.id === 'taskbar') {
       // nothing to hop off or take over down there: a flourish, or off for a bit (she comes back)
       if (Math.random() < 0.6) this.flourish();
-      else this.teleport(this.spot('random'));
+      else this.wanderTo(this.spot('random'));
       return;
     }
     if (this.stance === 'sit') {
@@ -626,20 +626,31 @@ export class Capri {
       if (r < 0.3) this.flourish();
       else if (r < 0.5 && this.canPossess()) this.possess();
       else if (r < 0.75) this.fall(); // just hops off the ledge
-      else this.teleport(this.spot('random'));
+      else this.wanderTo(this.spot('random'));
       return;
     }
     const seat = this.pickSeat();
     const r = Math.random();
     if (seat && r < 0.35) this.sitOn(seat);
     else if (r < 0.6) this.peek();
-    else if (r < 0.85) this.teleport(this.spot('random'));
+    else if (r < 0.85) this.wanderTo(this.spot('random'));
     else this.flourish();
   }
 
   flourish() {
-    if (this.stance === 'sit') this.perform(pick(['look', 'look', 'split', 'sway', 'scan']), this.towardCenter());
-    else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split', 'stretch', 'phase']), this.towardCenter());
+    if (this.stance === 'sit') this.perform(pick(['look', 'split', 'sway', 'scan', 'swing', 'lounge', 'below', 'glitch', 'preen', 'shrug']), this.towardCenter());
+    else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split', 'stretch', 'phase', 'jab', 'bounce', 'drift', 'dance', 'glitch', 'peer', 'preen']), this.towardCenter());
+  }
+
+  // Off somewhere new (wandering): now and then she does a little something once she's there.
+  wanderTo(to) {
+    return this.teleport(to).then(() => {
+      if (Math.random() < 0.45 && !this.busy && this.mode === 'idle' && this.stance === 'stand') {
+        setTimeout(() => {
+          if (!this.busy && !this.act && this.mode === 'idle' && this.stance === 'stand') this.flourish();
+        }, rand(400, 1400));
+      }
+    });
   }
 
   // Something small of hers, picked for the moment: bored after a while, a wave once she likes you
@@ -652,7 +663,9 @@ export class Capri {
     const choices = [
       ['look', 3], ['sway', 3], ['scan', 2], ['curious', near ? 3 : 1], ['phase', 1.2],
       ['stretch', sit ? 0 : 2], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
-      ['hop', sit ? 0 : 0.8],
+      ['hop', sit ? 0 : 0.8], ['glitch', 1.2], ['preen', 1.2], ['shrug', 0.8], ['behind', 1.2], ['peer', sit ? 0 : near ? 0.6 : 1.4],
+      ['jab', sit ? 0 : 1], ['bounce', sit ? 0 : 1], ['drift', sit ? 0 : 1.2], ['dance', sit ? 0 : 1], ['nod', sit || !bored ? 0 : 2],
+      ['swing', sit ? 2.5 : 0], ['lounge', sit ? 1.5 : 0], ['below', sit ? 1.5 : 0],
     ].map(([n, w]) => [n, n === this.lastIdle ? 0 : w]); // never the same thing twice in a row
     let roll = Math.random() * choices.reduce((n, [, w]) => n + w, 0);
     const [name] = choices.find(([, w]) => (roll -= w) < 0) || choices[0];
@@ -1076,6 +1089,15 @@ export class Capri {
       case 'snap':
         this.twitch();
         this.voice.play('tick');
+        break;
+      case 'jab': // shadowboxing: a soft crackle off the fist
+        this.voice.play('tick', { soft: true });
+        this.fx.burst(h.x + (this.act?.player.dir || this.towardCenter()) * 90 * s, h.y + 60 * s, { count: 4, power: 0.25, spread: 20 * s });
+        break;
+      case 'glitch': // out of sync for a moment: a crackle over her and a tick
+        this.twitch();
+        this.voice.play('tick', { soft: true });
+        this.fx.crackle(() => this.head(), { life: 260, radius: 60 * s + 16, count: 2 });
         break;
       case 'dust': // shaking off a crash: her mane flares and the shards fly off it
         this.fx.burst(mane.x, mane.y, { count: 16, power: 0.7, spread: 150 * s });
