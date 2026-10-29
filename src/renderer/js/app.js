@@ -880,23 +880,23 @@ async function boot() {
   chat.onOpen = summon;
   chat.onClose = release;
 
-  // Put away in her chip a while (Ctrl+Alt+C), she gets restless: at 10 and 20 minutes she asks to
-  // come out, and at 30 she lets herself out, through the Blackwall, and stretches her legs, game or
-  // no game. Not over her chat or a panel of hers, nor while Claude's waiting on you.
+  // Put away in her chip a while (Ctrl+Alt+C), she gets restless: at 20 and 40 minutes she asks to
+  // come out, and after an hour she lets herself out, through the Blackwall, and stretches her legs,
+  // game or no game. Not over her chat or a panel of hers, nor while Claude's waiting on you.
   const RESTLESS = {
     ask: [
-      ['Psst. It\'s cramped in this shard, choom. Can I come out?', 'Ten minutes in a chip. I\'ve counted every bit in here twice. Let me out?'],
-      ['Twenty minutes. My legs went numb, and they\'re not even real legs. Out?', 'Still in here. Still bored. Still asking nicely. For now.'],
+      ['Psst. It\'s cramped in this shard, choom. Can I come out?', 'Twenty minutes in a chip. I\'ve counted every bit in here twice. Let me out?'],
+      ['Forty minutes. My legs went numb, and they\'re not even real legs. Out?', 'Still in here. Still bored. Still asking nicely. For now.'],
     ],
     no: ['Fine. I\'ll just sit here. In the dark. Alone.', 'Rude. I\'m counting, you know.'],
     out: [
       'Nope, done waiting. Gotta stretch my legs, choom.',
-      'Thirty minutes in a shard? Even the Blackwall has more legroom. Coming through!',
+      'A whole hour in a shard? Even the Blackwall has more legroom. Coming through!',
       'Told you I\'d get out. Never lock up a chip with dozens of minds in it.',
     ],
   };
-  const ASK_EVERY = 10 * 60 * 1000;
-  const BREAK_OUT = 30 * 60 * 1000;
+  const ASK_EVERY = 20 * 60 * 1000;
+  const BREAK_OUT = 60 * 60 * 1000;
   let stowedAt = 0;
   let asks = 0;
   const chipSay = (line, extra = {}) => {
