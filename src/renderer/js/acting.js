@@ -862,6 +862,299 @@ export const ACTS = {
     ],
   },
 
+  // ---- more of her, bigger (capri.js idle) ----
+
+  // a backflip in the air: crouch, launch, the whole of her turned over on ones, and a stuck landing
+  flip: {
+    priority: 1,
+    fps: 24,
+    directional: true,
+    keys: [
+      [3, { sy: 0.86, sx: 1.08, bob: 6, arms: -0.3, mane: -0.1 }],
+      [1, { sy: 1.15, sx: 0.9, bob: -14, arms: 0.5, smear: [0, 16] }],
+      [1, { tilt: -45, bob: -30, arms: 0.6, mane: 0.2, echo: [6, 0] }],
+      [1, { tilt: -100, bob: -42, arms: 0.3, mane: 0.3, echo: [10, 0] }],
+      [1, { tilt: -160, bob: -50, arms: 0.1, mane: 0.36, echo: [12, 0] }],
+      [1, { tilt: -215, bob: -50, arms: 0.1, mane: 0.36, echo: [12, 0] }],
+      [1, { tilt: -270, bob: -42, arms: 0.3, mane: 0.3, echo: [10, 0] }],
+      [1, { tilt: -320, bob: -28, arms: 0.5, mane: 0.2, echo: [6, 0] }],
+      [1, { tilt: -360, bob: -12, arms: 0.6, sy: 1.08, sx: 0.94, smear: [0, -12] }],
+      [2, { sy: 0.8, sx: 1.14, bob: 5, arms: -0.2, mane: -0.1 }, 'land'],
+      [3, { sy: 0.95, sx: 1.03, bob: 2, arms: 0.4, mane: 0.1 }],
+      [6, { arms: 0.5, head: 0.1, mane: 0.12 }],
+      [1, {}],
+    ],
+  },
+
+  // rocking out to something only she hears: hard nods on twos, the mane flying up every time
+  headbang: {
+    priority: 1,
+    keys: [
+      [2, { head: -0.12, mane: 0.1, bob: -2 }],
+      ...rep(5, [
+        [2, { head: 0.26, mane: 0.42, bob: 3, arms: -0.2, sy: 0.96 }, 'strum'],
+        [2, { head: -0.14, mane: 0.12, bob: -2, arms: 0.1 }],
+      ]),
+      [3, { head: 0.04, mane: 0.2, arms: 0.6, bob: -4 }],
+      [1, {}],
+    ],
+  },
+
+  // air guitar: one hand on the neck, the other strumming on twos, head bobbing along, a big finish
+  guitar: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [3, { reach: 0.5, long: 1.1, armL: -0.1, tilt: -2, head: 0.06 }],
+      ...rep(4, [
+        [2, { reach: 0.5, long: 1.1, armL: 0.2, tilt: -3, head: 0.12, bob: 1 }, 'strum'],
+        [2, { reach: 0.5, long: 1.1, armL: -0.25, tilt: -2, head: 0.04, bob: -1 }],
+      ]),
+      [1, { reach: 0.5, long: 1.1, armL: 1.2, tilt: -5, head: -0.1, mane: 0.4, smear: [0, 10] }, 'sparkle'],
+      [6, { reach: 0.5, long: 1.1, armL: 1.1, tilt: -4, head: -0.08, mane: 0.3, bob: -4 }],
+      [2, { arms: 0, tilt: 0 }],
+      [1, {}],
+    ],
+  },
+
+  // a sneeze: head back, back, back, then snapped forward with shards of her mane blown off
+  sneeze: {
+    priority: 1,
+    keys: [
+      [3, { head: -0.06, mane: 0.04 }],
+      [3, { head: -0.14, mane: 0.08, bob: -1 }],
+      [4, { head: -0.22, mane: 0.12, bob: -3, arms: 0.1, sy: 1.03 }],
+      [1, { head: 0.3, mane: 0.6, bob: 4, sy: 0.9, sx: 1.06, smear: [0, -10], echo: [6, 0] }, 'sneeze'],
+      [3, { head: 0.22, mane: 0.36, bob: 3 }],
+      [6, { head: 0.08, mane: 0.1 }],
+      [1, {}],
+    ],
+  },
+
+  // hiccups: three little jolts, each one knocking her copies out of line for a drawing
+  hiccup: {
+    priority: 1,
+    keys: [
+      ...rep(3, [
+        [6, { head: 0.04 }],
+        [1, { bob: -6, sy: 1.06, sx: 0.96, mane: 0.2, echo: [8, -2], head: -0.06 }, 'snap'],
+        [2, { bob: -2, mane: 0.1 }],
+      ]),
+      [4, { head: 0.1, tilt: 1.5 }],
+      [1, {}],
+    ],
+  },
+
+  // jelly: squashed and stretched back and forth, like she's made of something soft, and settling
+  wobble: {
+    priority: 1,
+    fps: 24,
+    keys: [
+      [2, { sy: 0.8, sx: 1.18, bob: 5 }],
+      [2, { sy: 1.16, sx: 0.88, bob: -6, mane: 0.2 }],
+      [2, { sy: 0.88, sx: 1.1, bob: 3 }],
+      [2, { sy: 1.08, sx: 0.94, bob: -3, mane: 0.1 }],
+      [2, { sy: 0.95, sx: 1.04, bob: 1 }],
+      [2, { sy: 1.03, sx: 0.98 }],
+      [1, {}],
+    ],
+  },
+
+  // a fist pump, twice: yes, and yes
+  pump: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { reach: -0.3, bob: 2, sy: 0.95 }],
+      [1, { reach: 1.3, long: 1.2, bob: -8, mane: 0.3, smear: [0, 10] }, 'snap'],
+      [3, { reach: 1.25, long: 1.15, bob: -6, mane: 0.22 }],
+      [2, { reach: 0.3, bob: 0 }],
+      [1, { reach: 1.35, long: 1.25, bob: -10, mane: 0.36, smear: [0, 12] }, 'sparkle'],
+      [6, { reach: 1.3, long: 1.2, bob: -8, mane: 0.26, head: -0.06 }],
+      [2, { reach: 0.2 }],
+      [1, {}],
+    ],
+  },
+
+  // facepalm: a hand up over her eyes, head dropped into it, held, a sigh
+  facepalm: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { reach: 0.6, long: 0.8, head: 0.04 }],
+      [2, { reach: 1.15, long: 0.62, head: 0.16, mane: -0.06 }],
+      [14, { reach: 1.2, long: 0.6, head: 0.22, mane: -0.12, bob: 2 }],
+      [2, { reach: 0.5, long: 0.85, head: 0.06, bob: 1 }],
+      [1, {}],
+    ],
+  },
+
+  // thinking: a hand to her chin, head cocked, a long beat, and the idea lands (the mane lights up)
+  think: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { reach: 0.5, long: 0.75, head: 0.06 }],
+      [10, { reach: 0.85, long: 0.6, head: 0.14, tilt: 1.5 }],
+      [8, { reach: 0.85, long: 0.6, head: 0.18, tilt: 2, bob: -1 }],
+      [1, { reach: 1.3, long: 1.1, head: -0.04, mane: 0.36, bob: -6, smear: [0, 8] }, 'idea'],
+      [6, { reach: 1.25, long: 1.05, head: -0.02, mane: 0.24, bob: -5 }],
+      [2, { reach: 0.2 }],
+      [1, {}],
+    ],
+  },
+
+  // a salute, sharp, held, snapped off
+  salute: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [1, { reach: 0.4, long: 0.9 }],
+      [1, { reach: 1.25, long: 0.58, head: -0.04, smear: [6, -4] }],
+      [10, { reach: 1.22, long: 0.6, head: -0.06, bob: -1, sy: 1.02 }],
+      [1, { reach: 0.6, long: 1.2, smear: [-8, 4] }, 'snap'],
+      [2, { reach: 0.1 }],
+      [1, {}],
+    ],
+  },
+
+  // peekaboo: both hands over her face, a beat, and flung open with a bounce
+  peekaboo: {
+    priority: 1,
+    keys: [
+      [2, { arms: 0.7, longL: 0.8, longR: 0.8, head: 0.04 }],
+      [10, { arms: 1.15, longL: 0.62, longR: 0.62, head: 0.1, sy: 0.97, bob: 2 }],
+      [1, { arms: 1.4, longL: 1.2, longR: 1.2, head: -0.06, mane: 0.4, bob: -8, sy: 1.06 }, 'sparkle'],
+      [5, { arms: 1.3, longL: 1.1, longR: 1.1, head: -0.04, mane: 0.26, bob: -6 }],
+      [2, { arms: 0.2, bob: 0 }],
+      [1, {}],
+    ],
+  },
+
+  // a side stretch: arms up, bent over one way, then the other
+  bend: {
+    priority: 1,
+    keys: [
+      [2, { arms: 0.6, bob: -2 }],
+      [3, { arms: 1.05, bob: -5, tilt: -8, head: -0.08, hair: -3 }],
+      [8, { arms: 1.08, bob: -5, tilt: -11, head: -0.1, hair: -4 }],
+      [2, { arms: 1.05, bob: -6, tilt: 0, hair: 0 }],
+      [3, { arms: 1.05, bob: -5, tilt: 8, head: 0.08, hair: 3 }],
+      [8, { arms: 1.08, bob: -5, tilt: 11, head: 0.1, hair: 4 }],
+      [2, { arms: 0.4, tilt: 0, bob: 0 }],
+      [1, {}],
+    ],
+  },
+
+  // zoomies: darting side to side so fast her copies trail her, then stopping dead, very pleased
+  zoom: {
+    priority: 1,
+    fps: 24,
+    keys: [
+      [1, { tilt: 8, echo: [-18, 0], smear: [-14, 0], mane: 0.3 }],
+      [1, { tilt: -8, echo: [18, 0], smear: [14, 0], mane: 0.3 }],
+      [1, { tilt: 8, echo: [-22, 0], smear: [-16, 0], mane: 0.34 }],
+      [1, { tilt: -8, echo: [22, 0], smear: [16, 0], mane: 0.34 }],
+      [1, { tilt: 8, echo: [-18, 0], mane: 0.3 }],
+      [1, { tilt: -8, echo: [18, 0], mane: 0.3 }],
+      [2, { tilt: 0, sx: 1.08, sy: 0.94, mane: 0.36 }, 'snap'],
+      [10, { head: 0.12, mane: 0.16, bob: -2 }],
+      [1, {}],
+    ],
+  },
+
+  // meditating: she rises slowly, arms out, the Blackwall glowing around her, and comes back down
+  meditate: {
+    priority: 1,
+    keys: [
+      [4, { arms: 0.1, bob: -4, head: 0.06, hair: 0 }],
+      [6, { arms: 0.28, bob: -12, head: 0.1, wall: 0.2, hair: 0 }],
+      [12, { arms: 0.34, bob: -20, head: 0.12, wall: 0.42, mane: 0.1, hair: 0 }, 'glow'],
+      [10, { arms: 0.32, bob: -22, head: 0.12, wall: 0.5, mane: 0.12, hair: 0 }],
+      [6, { arms: 0.2, bob: -12, head: 0.06, wall: 0.24, hair: 0 }],
+      [4, { arms: 0.04, bob: -3, wall: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // a little pirouette, arms up over her head
+  twirl: {
+    priority: 1,
+    fps: 24,
+    keys: [
+      [2, { arms: 0.9, bob: -2, mane: 0.1 }],
+      [1, { arms: 1.1, sx: 0.6, bob: -6, mane: 0.26, echo: [6, 0] }],
+      [1, { arms: 1.15, sx: 0.15, bob: -8, mane: 0.34, echo: [10, 0] }],
+      [1, { arms: 1.15, sx: -0.4, bob: -8, mane: 0.34, echo: [10, 0] }],
+      [1, { arms: 1.15, sx: -0.85, bob: -8, mane: 0.3 }],
+      [1, { arms: 1.15, sx: -0.85, bob: -8, mane: 0.3 }],
+      [1, { arms: 1.15, sx: -0.4, bob: -7, mane: 0.34, echo: [10, 0] }],
+      [1, { arms: 1.15, sx: 0.15, bob: -5, mane: 0.34, echo: [10, 0] }],
+      [1, { arms: 1.1, sx: 0.6, bob: -3, mane: 0.26 }],
+      [2, { arms: 0.9, sx: 1.06, sy: 0.96, mane: 0.2 }, 'sparkle'],
+      [6, { arms: 0.5, head: 0.08 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: drumming her hands on the ledge, faster and faster, and a last double hit
+  drum: {
+    priority: 1,
+    keys: [
+      ...rep(3, [
+        [2, { armL: -0.28, armR: -0.44, head: 0.04, kickL: 0.1, kickR: 0.1 }, 'strum'],
+        [2, { armL: -0.44, armR: -0.28, head: -0.02, kickL: 0.1, kickR: 0.1 }],
+      ]),
+      ...rep(3, [
+        [1, { armL: -0.26, armR: -0.44, head: 0.06, kickL: 0.16, kickR: 0.1 }, 'strum'],
+        [1, { armL: -0.44, armR: -0.26, head: 0.02, kickL: 0.1, kickR: 0.16 }],
+      ]),
+      [1, { arms: -0.2, head: 0.1, mane: 0.2, bob: -2 }, 'snap'],
+      [6, { arms: -0.42, head: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: both legs kicked up high and held, rocking back on her hands
+  kickup: {
+    priority: 1,
+    keys: [
+      [2, { kickL: 0.3, kickR: 0.3, arms: -0.5, tilt: -2 }],
+      [3, { kickL: 0.62, kickR: 0.58, arms: -0.62, tilt: -5, head: -0.06, mane: 0.1 }],
+      [10, { kickL: 0.66, kickR: 0.62, arms: -0.64, tilt: -6, head: -0.08, mane: 0.12 }],
+      [2, { kickL: 0.3, kickR: 0.34, arms: -0.5, tilt: -2 }],
+      [3, { kickL: 0.08, kickR: 0.06, arms: -0.42 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: rocking forward and back on the ledge, humming to herself
+  rock: {
+    priority: 1,
+    keys: [
+      ...rep(3, [
+        [4, { tilt: 4, head: 0.1, arms: -0.44, kickL: 0.2, kickR: 0.2, bob: 1 }],
+        [4, { tilt: -3, head: -0.06, arms: -0.4, kickL: 0.02, kickR: 0.02, bob: -1 }],
+      ]),
+      [3, { head: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // sitting: dozing off on the ledge, head dropping, a jolt that nearly tips her off
+  doze: {
+    priority: 1,
+    keys: [
+      [6, { head: 0.1, mane: -0.08, arms: -0.44, kickL: 0.04, kickR: 0.04 }],
+      [8, { head: 0.2, mane: -0.14, arms: -0.46, bob: 2, kickL: 0.02, kickR: 0.02 }],
+      [6, { head: 0.26, mane: -0.18, arms: -0.48, bob: 3, tilt: 3 }],
+      [1, { head: -0.04, mane: 0.3, arms: -0.2, bob: -4, tilt: -3, smear: [0, 10], kickL: 0.4, kickR: 0.36 }, 'snap'],
+      [3, { head: -0.1, mane: 0.2, arms: -0.5, kickL: 0.2, kickR: 0.2 }],
+      [4, { head: 0.04, arms: -0.42 }],
+      [1, {}],
+    ],
+  },
+
   // ---- jealous (bond.js) ----
 
   // glaring at you over another AI: she snaps to it, leans in, mane bristling, holds it, and hisses

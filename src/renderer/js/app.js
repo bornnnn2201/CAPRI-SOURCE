@@ -19,6 +19,7 @@ import { screenPicture, blackwall, rebootOptics, cyberpsychosis, sandevistan, ov
 import { Pc } from './pc.js';
 import { linesFor } from './lines.js';
 import { pick, fmt, reducedMotion } from './util.js';
+import { isStop } from './hearing.js';
 
 const host = window.host;
 
@@ -283,7 +284,35 @@ async function boot() {
   chat.speech = speech;
   new Ears({ speech, capri }); // LISTENING by her head while she waits for you to speak
   let guestHackAt = -Infinity;
+  // "No", "stop", "cancel", "wait": said over her or after she got you wrong. Whatever she's saying is
+  // cut off, her answer on its way dropped, and she listens for what you meant, no "Hey Capri" needed.
+  const STOP_LINES = ['Okay, scrapped. Go again.', 'Got it, stopping. What did you mean?', 'Cancelled. I\'m listening.', 'My bad. Say it again?', 'Stopped. Try me again, choom.'];
+  const interrupt = () => {
+    speech.cut();
+    chat.cancel();
+    capri.stopPointing();
+    if (!capri.stowed && !capri.busy) capri.perform('curious', capri.towardCenter());
+    if (!capri.stowed) panel.say({ kind: 'info', face: 'look', line: pick(STOP_LINES), hold: 3000 });
+    voice.play('blip');
+    speech.expectReply(12000);
+  };
+  speech.onInterrupt = () => interrupt();
   speech.onCommand = async (text, { from = 'you' } = {}) => {
+    // your answer to a popup she asked you about ("no, don't save") is that, not you cutting her off
+    const answering = chat.pendingChoice && Date.now() < chat.pendingChoice.until;
+    if (from === 'you' && isStop(text) && !answering) {
+      chat.log('you', text);
+      interrupt();
+      return;
+    }
+    // "No, open Spotify instead": what she was at dropped, then what you meant, as the request
+    // (only a request after it: "no way, that's cool" is just talk)
+    const instead = from === 'you' && !answering && /^(?:no+|nope|nah|wait|stop|cancel(?: that)?|no wait|actually)[,.!\s]+(?:i (?:said|meant)\s+)?((?:open|close|play|put|mute|unmute|deafen|undeafen|turn|set|skip|launch|start|show|minimi[sz]e|maximi[sz]e|share|leave|use|search|find|go|pause|resume|lock|switch|bring|move|make)\b.{2,})$/i.exec(text.trim());
+    if (instead) {
+      speech.cut();
+      chat.cancel();
+      text = instead[1].replace(/\s+instead[.!]?$/i, '');
+    }
     // Audience mode: someone in your call. Her effects (one every 30 s at most, and never the short
     // circuit: that's your game it would minimize) and the music; the rest chat.whisper keeps to talk
     if (from === 'pc') {

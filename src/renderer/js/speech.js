@@ -3,7 +3,7 @@
 // like a construct coming off a chip: close to her, a copy of nobody.
 
 import { pick } from './util.js';
-import { heardAs } from './hearing.js';
+import { heardAs, isStop } from './hearing.js';
 
 const PITCH = 1.2;          // as in main/speech.js (each voice can have its own: it comes with her line)
 const PRE_ROLL_MS = 300;    // kept from before you start talking, so the first word isn't clipped
@@ -152,12 +152,69 @@ export class Speech {
     this.stop();
     this.voice.wake(buffer.duration + 1);
     this.talking = true;
+    this.lineNow = line; // what she's saying: her own words in your mic don't count as you cutting in
     this.capri.pulse();
     await new Promise((resolve) => {
+      this.endNow = resolve;
       const length = this.play(ctx, buffer, deep, resolve, wavs.pitch || PITCH);
       this.ending = setTimeout(resolve, length * 1000 + 500); // in case onended never comes
     });
+    this.endNow = null;
     if (ticket === this.ticket) setTimeout(() => { this.talking = false; }, 300); // the room's echo of her
+  }
+
+  // Cut off (you said "stop", app.js): her line stopped mid-word, and the ones on their way dropped.
+  cut() {
+    this.ticket += 1;
+    this.made = null;
+    this.afterTalk = null;
+    this.barge = null;
+    this.stop();
+    this.endNow?.();
+    this.endNow = null;
+  }
+
+  // While she talks she doesn't listen (she'd hear herself), except for you cutting in: a short burst
+  // of your voice, clearly louder than the room (her own voice through speakers comes in quieter
+  // than you), heard by the quick model, and only "no", "stop", "cancel", "wait"... count, and not
+  // when it's a word she's saying herself right then (onInterrupt).
+  bargeIn(data, rate, ms) {
+    if (!this.onInterrupt || this.callWith === 'key') return;
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const loud = Math.sqrt(sum / data.length) > Math.max(0.03, this.floor * 6) && voiced(data, rate);
+    if (!this.barge && !loud) return;
+    const b = this.barge || (this.barge = { chunks: [], ms: 0, voiced: 0, quiet: 0 });
+    b.chunks.push(data);
+    b.ms += ms;
+    if (loud) {
+      b.voiced += ms;
+      b.quiet = 0;
+    } else b.quiet += ms;
+    // too long to be "stop" (it's her, or you talking over her about something else), or just a blip
+    if (b.voiced > 1800 || b.ms > 2600 || (b.quiet >= 300 && b.voiced < 140)) {
+      this.barge = null;
+      return;
+    }
+    if (b.quiet >= 300) {
+      this.barge = null;
+      this.checkBarge(b.chunks, rate);
+    }
+  }
+
+  async checkBarge(chunks, rate) {
+    if (this.bargeBusy) return;
+    this.bargeBusy = true;
+    try {
+      const text = cleanHeard(await this.host.voiceHear(toWav(chunks, rate), false));
+      if (!isStop(text) || !this.talking) return;
+      const said = String(this.lineNow || '').toLowerCase();
+      const words = text.toLowerCase().match(/[a-z']+/g) || [];
+      if (words.every((w) => new RegExp(String.raw`\b${w}\b`).test(said))) return; // her own words, through your speakers
+      this.onInterrupt?.(text);
+    } finally {
+      this.bargeBusy = false;
+    }
   }
 
   stop() {
@@ -424,6 +481,7 @@ export class Speech {
     if (this.talking) {
       this.seg = null;
       this.loudFor = 0;
+      this.bargeIn(data, rate, ms);
       return;
     }
     let sum = 0;

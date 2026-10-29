@@ -36,6 +36,16 @@ const COMMANDS = [
   'turn my camera on', 'turn my camera off',
 ]; // (not "leave the call": a near miss of that is too easily something else, and you'd be out of it)
 
+// You cutting her off, she got it wrong: "no", "stop", "cancel", "wait", "no no no, stop", "never
+// mind", "that's wrong", on its own. (Whisper: "Nope.", "No, no, no, no. Cancel.", "Stop it.")
+const STOP_WORD = String.raw`(?:no+|nope|nah|stop|stop it|cancel|cancel that|cancel it|wait|hold on|hang on|never ?mind|nevermind|shut up|be quiet|quiet|enough|forget it|abort|not that|that's wrong|that's not it|wrong|no wait|stop stop|capri)`;
+const STOP_ASK = new RegExp(String.raw`^(?:${STOP_WORD})(?:\s+(?:${STOP_WORD}|please|that|it|now|capri|you got it wrong|you're wrong|that's not what i said|not that one))*$`);
+export function isStop(text) {
+  const c = String(text || '').toLowerCase().replace(/[’`]/g, "'").replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)\s*/, '').replace(OPENERS, '').trim();
+  return Boolean(c) && c.split(' ').length <= 9 && c !== 'capri' && STOP_ASK.test(c);
+}
+
 // what you call out before the command: "brother, mute my mic", "yo, go rest", "okay so, skip this"
 export const OPENERS = /^(?:(?:bro(?:ther)?|bruh|brah|dude|man|mate|homie|choom|yo|okay|ok|alright|right|so|please|pls|can you|could you)\s+)+/;
 

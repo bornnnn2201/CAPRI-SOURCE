@@ -557,7 +557,7 @@ export class Capri {
 
     // little things she does with herself while nothing's going on, between wandering off
     if (now > this.nextIdle) {
-      this.nextIdle = now + rand(10000, 24000);
+      this.nextIdle = now + rand(8000, 18000);
       if (this.mode === 'idle' && !this.act && !this.pointing && ['stand', 'sit'].includes(this.stance) && !reducedMotion.matches) this.idle(now);
     }
     if (now > this.nextSurge) {
@@ -638,8 +638,8 @@ export class Capri {
   }
 
   flourish() {
-    if (this.stance === 'sit') this.perform(pick(['look', 'split', 'sway', 'scan', 'swing', 'lounge', 'below', 'glitch', 'preen', 'shrug']), this.towardCenter());
-    else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split', 'stretch', 'phase', 'jab', 'bounce', 'drift', 'dance', 'glitch', 'peer', 'preen']), this.towardCenter());
+    if (this.stance === 'sit') this.perform(pick(['split', 'sway', 'swing', 'lounge', 'below', 'glitch', 'preen', 'shrug', 'drum', 'kickup', 'rock', 'headbang', 'think']), this.towardCenter());
+    else this.perform(pick(['spin', 'hop', 'split', 'phase', 'jab', 'bounce', 'drift', 'dance', 'glitch', 'peer', 'preen', 'flip', 'guitar', 'twirl', 'zoom', 'pump', 'wobble', 'headbang', 'salute']), this.towardCenter());
   }
 
   // Off somewhere new (wandering): now and then she does a little something once she's there.
@@ -660,16 +660,23 @@ export class Capri {
     const bored = now - this.lastActivity > 3 * 60 * 1000;
     const m = this.mouse;
     const near = m && Math.hypot(m.x - this.pos.x, m.y - (this.pos.y - 200 * this.scale)) < 450;
+    const stand = sit ? 0 : 1;
     const choices = [
-      ['look', 3], ['sway', 3], ['scan', 2], ['curious', near ? 3 : 1], ['phase', 1.2],
-      ['stretch', sit ? 0 : 2], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
+      ['look', 1.4], ['sway', 1.4], ['scan', 1], ['curious', near ? 3 : 1], ['phase', 1.2],
+      ['stretch', sit ? 0 : 1.5], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
       ['hop', sit ? 0 : 0.8], ['glitch', 1.2], ['preen', 1.2], ['shrug', 0.8], ['behind', 1.2], ['peer', sit ? 0 : near ? 0.6 : 1.4],
-      ['jab', sit ? 0 : 1], ['bounce', sit ? 0 : 1], ['drift', sit ? 0 : 1.2], ['dance', sit ? 0 : 1], ['nod', sit || !bored ? 0 : 2],
-      ['swing', sit ? 2.5 : 0], ['lounge', sit ? 1.5 : 0], ['below', sit ? 1.5 : 0],
-    ].map(([n, w]) => [n, n === this.lastIdle ? 0 : w]); // never the same thing twice in a row
+      ['jab', stand], ['bounce', stand], ['drift', sit ? 0 : 1.2], ['dance', stand], ['nod', sit || !bored ? 0 : 2],
+      ['swing', sit ? 2 : 0], ['lounge', sit ? 1.5 : 0], ['below', sit ? 1.5 : 0],
+      // the bigger ones
+      ['flip', sit ? 0 : 0.9], ['headbang', 1], ['guitar', stand * 1.1], ['sneeze', 0.7], ['hiccup', 0.8], ['wobble', stand],
+      ['pump', 0.9], ['facepalm', 0.8], ['think', 1.1], ['salute', near ? 1 : 0.4], ['peekaboo', near ? 1.4 : 0.5],
+      ['bend', stand], ['zoom', stand * 0.9], ['meditate', sit ? 0 : bored ? 2 : 0.7], ['twirl', stand],
+      ['drum', sit ? 1.6 : 0], ['kickup', sit ? 1.2 : 0], ['rock', sit ? 1.4 : 0], ['doze', sit && bored ? 2 : sit ? 0.4 : 0],
+    ].map(([n, w]) => [n, (this.recentIdle || []).includes(n) ? 0 : w]); // none of the last few again
     let roll = Math.random() * choices.reduce((n, [, w]) => n + w, 0);
     const [name] = choices.find(([, w]) => (roll -= w) < 0) || choices[0];
     this.lastIdle = name;
+    this.recentIdle = [...(this.recentIdle || []), name].slice(-5);
     if (name === 'wave') this.wavedAt = now;
     const toPointer = near && ['curious', 'wave'].includes(name) ? (m.x < this.pos.x ? -1 : 1) : this.towardCenter();
     this.perform(name, toPointer);
@@ -1183,6 +1190,30 @@ export class Capri {
         this.voice.play('tick', { soft: true });
         this.fx.burst(h.x + (this.act?.player.dir || this.towardCenter()) * 90 * s, h.y + 60 * s, { count: 4, power: 0.25, spread: 20 * s });
         break;
+      case 'strum': // her air guitar, her drumming, a headbang: a soft tick on the beat
+        this.voice.play('tick', { soft: true });
+        break;
+      case 'sparkle': // a flourish: a few shards off her
+        this.fx.burst(mane.x, mane.y, { count: 8, power: 0.45, spread: 80 * s });
+        break;
+      case 'sneeze': // shards of her mane blown right off
+        this.fx.burst(mane.x + (this.facing || 1) * 30 * s, mane.y + 20 * s, { count: 22, power: 0.9, spread: 120 * s });
+        this.voice.play('tick');
+        this.twitch();
+        break;
+      case 'idea': // it lands: a ring over her head
+        this.fx.ring(h.x, h.top - 20 * s, { size: 0.3 });
+        this.voice.play('tick');
+        break;
+      case 'glow': // meditating: the wall answers
+        this.voice.play('star', { soft: true });
+        break;
+      case 'land': { // a stuck landing
+        const feet = this.flat(SPRITE.feet.x, SPRITE.feet.y);
+        this.fx.ring(feet.x, feet.y, { size: 0.3 });
+        this.voice.play('land', { soft: true });
+        break;
+      }
       case 'glitch': // out of sync for a moment: a crackle over her and a tick
         this.twitch();
         this.voice.play('tick', { soft: true });

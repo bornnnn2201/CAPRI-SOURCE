@@ -1,4 +1,4 @@
-// Her biochip's looks (chip.js): five shards the way Edgerunners draws them, lying on their side,
+// Her biochip's looks (chip.js): six shards the way Edgerunners draws them, lying on their side,
 // each hers. Flat cel tones, ink lines, hard glints, her violet misregistration behind, and her face
 // (her mask, its eyes) on every one. Design px, CHIP_SIZE wide and high; the prongs point right.
 //
@@ -351,30 +351,30 @@ const HYBRID_TRACES = [
   [[70, 28], [96, 28], [101, 32], [128, 32], [133, 27], [160, 27]], [[70, 40], [88, 40], [93, 36], [118, 36], [123, 40], [182, 40]],
   [[140, 33], [166, 33], [171, 29], [184, 29]], [[108, 28], [112, 25]],
 ];
-function hybrid(ctx, s) {
+function hybridIn(ctx, s, P) {
   const shapes = [R.holder, R.bar, R.head];
   if (backing(ctx, shapes, s)) return;
-  prongs(ctx, 203, [19, 27, 35, 43], 14, s, { fill: SILVER.mid, lit: SILVER.lit, dark: SILVER.dark });
-  // the body: black, its underside blacker; the head at the end in silver
+  prongs(ctx, 203, [19, 27, 35, 43], 14, s, { fill: P.mid, lit: P.lit, dark: P.dark });
+  // the body: black, its underside blacker; the head at the end in the trim's colour
   poly(ctx, R.holder); ctx.fillStyle = '#17141d'; ctx.fill();
   poly(ctx, R.bar); ctx.fillStyle = '#1d1924'; ctx.fill();
-  poly(ctx, R.head); ctx.fillStyle = SILVER.mid; ctx.fill();
+  poly(ctx, R.head); ctx.fillStyle = P.mid; ctx.fill();
   ctx.save();
   clipTo(ctx, shapes);
   ctx.fillStyle = '#0c0a10';
   ctx.fillRect(0, 46, 190, 12);
-  ctx.fillStyle = SILVER.dark; ctx.fillRect(188, 44, 18, 10);
+  ctx.fillStyle = P.dark; ctx.fillRect(188, 44, 18, 10);
   // silver trim: the lit top edges, the step plates, a thin red line in the notch (hers)
-  ctx.fillStyle = SILVER.lit;
+  ctx.fillStyle = P.lit;
   ctx.fillRect(4, 13.5, 58, 1.6); ctx.fillRect(64, 19.5, 86, 1.4); ctx.fillRect(154, 15.5, 22, 1.4); ctx.fillRect(189, 17.5, 12, 1.4);
-  ctx.fillStyle = SILVER.mid;
+  ctx.fillStyle = P.mid;
   ctx.fillRect(152, 15, 26, 7); ctx.fillRect(152, 47, 26, 6);
-  ctx.fillStyle = SILVER.lit; ctx.fillRect(152, 15, 26, 1.4);
+  ctx.fillStyle = P.lit; ctx.fillRect(152, 15, 26, 1.4);
   ctx.fillStyle = COLORS.red; ctx.fillRect(64, 47.5, 84, 1.2);
   ctx.restore();
   // the channel in a silver bezel: dark red glass, her glitter, silver traces with light running on them
-  poly(ctx, box(66, 22, 122, 24)); ctx.fillStyle = SILVER.mid; ctx.fill();
-  ctx.fillStyle = SILVER.lit; ctx.fillRect(66, 22, 122, 1.2);
+  poly(ctx, box(66, 22, 122, 24)); ctx.fillStyle = P.mid; ctx.fill();
+  ctx.fillStyle = P.lit; ctx.fillRect(66, 22, 122, 1.2);
   poly(ctx, R.channel);
   const g = ctx.createLinearGradient(0, 24, 0, 44);
   g.addColorStop(0, '#22060f'); g.addColorStop(0.5, s.mode === 'alert' && s.blink ? '#a3123f' : '#6e0f33'); g.addColorStop(1, '#1a040d');
@@ -384,10 +384,10 @@ function hybrid(ctx, s) {
   glow.addColorStop(0, 'rgba(255, 40, 100, 0)'); glow.addColorStop(0.5, 'rgba(255, 60, 120, 0.45)'); glow.addColorStop(1, 'rgba(255, 40, 100, 0)');
   ctx.fillStyle = glow; ctx.fillRect(68, 24, 118, 20);
   ctx.lineWidth = 1.1;
-  ctx.strokeStyle = 'rgba(214, 218, 236, 0.7)';
+  ctx.strokeStyle = P.trace;
   for (const t of HYBRID_TRACES) {
     ctx.beginPath(); t.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
-    ctx.fillStyle = SILVER.lit; ctx.fillRect(t[0][0] - 1.3, t[0][1] - 1.3, 2.6, 2.6);
+    ctx.fillStyle = P.lit; ctx.fillRect(t[0][0] - 1.3, t[0][1] - 1.3, 2.6, 2.6);
   }
   const px = 68 + ((s.drift * 2) % 118);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
@@ -401,18 +401,24 @@ function hybrid(ctx, s) {
   ctx.save(); poly(ctx, box(9, 18, 36, 26)); ctx.clip();
   eyesOnly(ctx, s, 27, 31, 0.45);
   ctx.restore();
-  poly(ctx, box(9, 18, 36, 26)); ctx.strokeStyle = SILVER.mid; ctx.lineWidth = 1.4; ctx.stroke();
+  poly(ctx, box(9, 18, 36, 26)); ctx.strokeStyle = P.mid; ctx.lineWidth = 1.4; ctx.stroke();
   for (const [x, y] of [[50, 18], [50, 48], [6, 50]]) {
-    ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fillStyle = SILVER.mid; ctx.fill();
-    ctx.fillStyle = SILVER.lit; ctx.fillRect(x - 1.2, y - 0.6, 2.4, 0.9);
+    ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fillStyle = P.mid; ctx.fill();
+    ctx.fillStyle = P.lit; ctx.fillRect(x - 1.2, y - 0.6, 2.4, 0.9);
   }
-  label(ctx, 'CPRN', 10, 52, 6, SILVER.mid);
-  label(ctx, '02', 48, 31, 6, SILVER.mid);
+  label(ctx, 'CPRN', 10, 52, 6, P.text || P.mid);
+  label(ctx, '02', 48, 31, 6, P.text || P.mid);
   led(ctx, s, 47, 37, 7, 4);
   outline(ctx, shapes);
 }
+const hybrid = (ctx, s) => hybridIn(ctx, s, { ...SILVER, trace: 'rgba(214, 218, 236, 0.7)' });
+// ---------- 7. Blackout: the same shard all in black, no silver: gunmetal edges catching a little light,
+// her red running along the traces ----------
+const BLACKOUT = { lit: '#5a5368', mid: '#2b2733', dark: '#121016', trace: 'rgba(255, 70, 120, 0.75)', text: '#9b2e52' };
+const blackout = (ctx, s) => hybridIn(ctx, s, BLACKOUT);
 
 export const DESIGNS = [
+  { id: 'blackout', name: 'Blackout', draw: blackout, face: { x: 27, y: 31 } },
   { id: 'hybrid', name: 'Black & silver', draw: hybrid, face: { x: 27, y: 31 } },
   { id: 'relic', name: 'Relic', draw: relic, face: { x: 27, y: 34 } },
   { id: 'crimson', name: 'Crimson circuit', draw: crimson, face: { x: 26, y: 34 } },

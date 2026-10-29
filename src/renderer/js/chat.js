@@ -716,6 +716,17 @@ export class Chat {
     capri.nextMove = capri.nextGaze = performance.now() + STAY_MS;
   }
 
+  // "no", "stop", "cancel" (app.js): her answer on its way dropped (the model stopped), nothing more
+  // of it said or done, your message with it, and her chat ready for what you meant instead.
+  cancel() {
+    this.cutAt = Date.now();
+    clearInterval(this.openWatch);
+    if (!this.turn) return;
+    this.host.chatStop(this.turn);
+    this.turn = 0;
+    this.panel.setChatBusy(false);
+  }
+
   close() {
     if (!this.open) return;
     this.open = false;
@@ -1041,6 +1052,7 @@ export class Chat {
   async whisper(text, { from = 'you' } = {}) {
     if (this.whispering) return { line: pick(WHISPER_BUSY), face: 'aside' };
     this.whispering = true;
+    const started = Date.now();
     const guest = from === 'pc';
     try {
       this.history.push({ role: 'user', content: guest ? `(Someone else in the user's voice call, not the user, says:) ${text}` : text });
@@ -1084,6 +1096,11 @@ export class Chat {
         line = [line, said].filter(Boolean).join('\n');
       }
       if (!line) return null;
+      // you said "stop" meanwhile: not said, and your message not left for the next answer to answer
+      if ((this.cutAt || 0) >= started) {
+        if (this.history.at(-1)?.role === 'user') this.history.pop();
+        return null;
+      }
       this.remember({ role: 'assistant', content: line });
       this.spokenAt = Date.now();
       this.speech?.say(line);

@@ -46,7 +46,7 @@ const DEFAULTS = {
   callWith: 'name',  // how you call her: 'name' ("Hey Capri", or her key) or 'key' (only Ctrl+Alt+V: Whisper idle till then)
   hearing: 'fast',   // her ears on the processor: 'fast' (~2 s, the quick model) or 'accurate' (~6 s, the bigger one for requests)
   gaming: false,     // gaming mode: she keeps off the screen you're playing on until you call her
-  chipStyle: 'hybrid', // her biochip's look when put away: hybrid | relic | crimson | teal | label | industrial (chips.js)
+  chipStyle: 'blackout', // her biochip's look when put away: blackout | hybrid | relic | crimson | teal | label | industrial (chips.js)
   audience: false,   // audience mode: she hears the PC's own sound too (Discord), so your call can call her
   voiceVolume: 1,    // her spoken voice only, 0 to 2 (her other sounds: volume)
   glitch: 'anime',   // how broken up her voice is: 'subtle', 'anime' or 'heavy' (renderer speech.js)
