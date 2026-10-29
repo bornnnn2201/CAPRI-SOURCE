@@ -5,6 +5,7 @@ the shader draws a mirrored copy of the reaching arm in its place, so both hands
 both arms can be animated. The canvas is widened so the mirrored hand fits.
 
     python tools/build-sprite.py [--preview out.png]
+    node tools/recolor-sprite.mjs      (then: her arm and left leg in the show's red)
 
 Needs Pillow. Keep the masks below in sync with src/renderer/js/sprite.js.
 """

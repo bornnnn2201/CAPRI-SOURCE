@@ -124,13 +124,18 @@ vec4 cel(vec2 s) {
   if (c.a <= 0.0) return vec4(0.0);
   float red;
   c.rgb = grade(c.rgb, red);
-  // speckles on the red parts: a fixed star field plus a few that twinkle per drawing.
-  // One speck is about one screen pixel whatever her size, and sticks to the body.
+  // her glitter on the red parts, as the show paints it: fine and dense, pink with white sparks in
+  // it, thickest up in her mane (its top goes almost pale with it); a fixed field plus a few that
+  // twinkle per drawing. One speck is about one screen pixel whatever her size, and sticks to her.
   if (red > 0.0 && uSparkle > 0.0) {
-    vec2 cell = floor(s / max(0.8, uPx * 1.2));
-    float star = step(0.976, hash(cell + 3.1)) * 0.85;
-    float tw = step(0.993, hash(cell + uSeed * 1.37));
+    vec2 cell = floor(s / max(0.8, uPx * 1.05));
+    float up = 1.0 - smoothstep(30.0, 170.0, s.y); // 1 at the top of her mane, 0 from her chest down
+    float pink = step(0.86 - up * 0.1, hash(cell + 3.1)) * (0.45 + up * 0.2);
+    float star = step(0.972 - up * 0.02, hash(cell + 7.7)) * 0.9;
+    float tw = step(0.992, hash(cell + uSeed * 1.37));
+    c.rgb = mix(c.rgb, vec3(1.0, 0.62, 0.74), clamp(pink * red * uSparkle, 0.0, 1.0));
     c.rgb = mix(c.rgb, vec3(1.0, 0.95, 0.97), clamp((star + tw) * red * uSparkle, 0.0, 1.0));
+    c.rgb = mix(c.rgb, vec3(1.0, 0.8, 0.86), up * 0.16 * red * uSparkle); // the glow of it up there
   }
   return vec4(c.rgb * c.a, c.a);
 }
