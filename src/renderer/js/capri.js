@@ -14,6 +14,10 @@ import { sleep, rand, pick, clamp, lerp, ease, tween, reducedMotion, today } fro
 const ON_TWOS = 1000 / 12;
 const ON_ONES = 1000 / 24;
 const ASLEEP = 1000 / 6;
+// Every drawing of her is a whole new frame of her see-through window, as big as the screen, for Windows
+// to blend: when nothing's going on she draws fewer (on threes), and fewer still kept off your game.
+const IDLE = 1000 / 8;
+const LOW_POWER = 1000 / 4;
 const SLEEP_AFTER = 10 * 60 * 1000;
 const DOZE_AFTER = 20 * 1000; // asleep this long, she comes apart down to her mask
 const GRAVITY = 2600; // px/s²
@@ -62,6 +66,7 @@ export class Capri {
     this.possessWindows = true; // tray: "Possess my windows"
     this.restOn = 'corner'; // where she rests when nothing's going on: her corner, or 'taskbar' (her menu)
     this.nextHome = 0;
+    this.lowPower = false; // kept off your game's screen (app.js): she draws only a few frames a second
     this.dragging = false;
     this.track = [];      // where the pointer was lately while it holds her: [{ x, y, t }]
     this.spin = 0;        // degrees she's turned while held, flying or knocked down
@@ -79,7 +84,7 @@ export class Capri {
       seed: 0, boil: 0.9, hair: 0, head: 0, mane: 0, armL: 0, armR: 0, longL: 1, longR: 1, sit: 0, kickL: 0, kickR: 0,
       smear: [0, 0], echo: [0, 0],
       glitch: 0, glitchSeed: 0, split: 0, collapse: 0, dissolve: 0, sparkle: 1, grade: 1,
-      sil: INK, silAmount: 0, misreg: [-2.6, 2.2], alpha: 1,
+      sil: INK, silAmount: 0, misreg: [-2.6, 2.2], alpha: 1, wall: 0, phase: 0,
     };
     this.bob = 0;
     this.tilt = 0;
@@ -95,6 +100,11 @@ export class Capri {
     this.nextMove = now + rand(40000, 80000);
     this.nextGaze = now + rand(40000, 90000);
     this.nextShed = now + rand(3000, 8000);
+    this.nextIdle = now + rand(12000, 22000); // a little something of hers (idle)
+    this.nextSurge = now + rand(15000, 35000); // the Blackwall showing through around her (wallNow)
+    this.surgeAt = null;     // { at, peak, hold }
+    this.flickAt = -Infinity; // a twitch: the wall flickers with it
+    this.drawn = { move: '', look: '' }; // her transforms as last set (place)
     this.nextNotice = 0;
     this.peekUntil = 0;
     this.lastGlyph = 0;
@@ -253,8 +263,14 @@ export class Capri {
       const ox = (sq.at.x - left).toFixed(1), oy = (sq.at.y - top).toFixed(1);
       move += ` translate(${ox}px, ${oy}px) scale(${sq.x.toFixed(3)}, ${sq.y.toFixed(3)}) translate(${-ox}px, ${-oy}px)`;
     }
-    this.root.style.transform = move;
-    this.canvas.style.transform = `rotate(${this.turn.toFixed(2)}deg) scale(${(this.facing * this.sx).toFixed(3)}, ${this.sy.toFixed(3)})`;
+    const look = `rotate(${this.turn.toFixed(2)}deg) scale(${(this.facing * this.sx).toFixed(3)}, ${this.sy.toFixed(3)})`;
+    // most of her drawings don't move her at all (the line boils in place): no style to redo then,
+    // and nothing for the page to follow
+    if (move === this.drawn.move && look === this.drawn.look) return;
+    if (move !== this.drawn.move) this.root.style.transform = move;
+    if (look !== this.drawn.look) this.canvas.style.transform = look;
+    this.drawn.move = move;
+    this.drawn.look = look;
     this.onMove?.(this.head());
   }
 
@@ -352,6 +368,20 @@ export class Capri {
     }
   }
 
+  // The window she sits on moved (you're dragging it): its new edge, ~64 times a second. She rides
+  // it; whether she can stay on it is still the next full look's call (setWindows).
+  followSeat(rect) {
+    if (this.stance !== 'sit' || this.perch?.id !== rect.id || this.busy || this.dragging) return;
+    const win = this.windows.wins.find((w) => w.id === rect.id);
+    if (win) Object.assign(win, rect);
+    const on = win || rect;
+    const to = this.seat(on, clamp(this.perch.dx, 50, on.w - 60));
+    if (to.x !== this.pos.x || to.y !== this.pos.y) {
+      this.pos = to;
+      this.place();
+    }
+  }
+
   // Where her feet go so that her hips rest on the window's top edge.
   seat(win, dx) {
     return { x: win.x + dx, y: win.y + 3 + (SPRITE.feet.y - SPRITE.hip) * this.scale };
@@ -413,15 +443,21 @@ export class Capri {
 
   interval() {
     if (this.busy || this.stance === 'fall' || SPUN.has(this.stance) || this.skid || this.act?.player.act.fps === 24) return ON_ONES;
-    return this.mode === 'sleep' ? ASLEEP : ON_TWOS;
+    if (this.act || this.dragging || this.pointing) return ON_TWOS;
+    if (this.lowPower) return LOW_POWER; // waiting on another screen than your game's (app.js)
+    if (this.mode === 'sleep') return ASLEEP;
+    return this.mode === 'idle' && ['stand', 'sit'].includes(this.stance) ? IDLE : ON_TWOS;
   }
 
+  // Woken only when a drawing is due, not on every refresh of the screen (each of those keeps the page
+  // and the GPU process at work for nothing): a timer to just before it, then the next refresh.
   loop(now) {
-    requestAnimationFrame(this.loop);
-    if (this.hidden) return;
-    if (now - this.lastDraw < this.interval() - 1) return;
-    this.drawFrame(now);
-    this.behave(now);
+    if (!this.hidden && now - this.lastDraw >= this.interval() - 1) {
+      this.drawFrame(now);
+      this.behave(now);
+    }
+    const wait = this.hidden ? 250 : Math.max(0, this.interval() - (performance.now() - this.lastDraw) - 6);
+    setTimeout(() => requestAnimationFrame(this.loop), wait);
   }
 
   drawFrame(now = performance.now()) {
@@ -475,6 +511,8 @@ export class Capri {
     p.kickR = pose.kickR;
     p.smear = pose.smear;
     p.echo = pose.echo;
+    p.wall = Math.max(pose.wall, this.wallNow(now));
+    p.phase = reducedMotion.matches ? 0 : pose.phase;
     // on a ledge she stays seated: no lifting off it, no sinking through it
     const bob = this.stance === 'sit' ? clamp(pose.bob, -3, 2) : pose.bob;
     const spun = SPUN.has(this.stance);
@@ -511,6 +549,16 @@ export class Capri {
     if (now > this.nextShed) {
       this.nextShed = now + rand(4000, 11000) * (this.mode === 'sleep' ? 2.5 : 1);
       if (!reducedMotion.matches && this.stance !== 'peek') this.shed();
+    }
+
+    // little things she does with herself while nothing's going on, between wandering off
+    if (now > this.nextIdle) {
+      this.nextIdle = now + rand(14000, 32000);
+      if (this.mode === 'idle' && !this.act && !this.pointing && ['stand', 'sit'].includes(this.stance) && !reducedMotion.matches) this.idle(now);
+    }
+    if (now > this.nextSurge) {
+      this.nextSurge = now + rand(22000, 55000);
+      if (this.mode !== 'sleep') this.surgeAt = { at: now, peak: rand(0.28, 0.5), hold: rand(1600, 3800) };
     }
 
     if (this.mode === 'idle' && this.stance !== 'peek' && now > this.nextGaze) {
@@ -586,8 +634,44 @@ export class Capri {
   }
 
   flourish() {
-    if (this.stance === 'sit') this.perform(pick(['look', 'look', 'split']));
-    else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split']), this.towardCenter());
+    if (this.stance === 'sit') this.perform(pick(['look', 'look', 'split', 'sway', 'scan']), this.towardCenter());
+    else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split', 'stretch', 'phase']), this.towardCenter());
+  }
+
+  // Something small of hers, picked for the moment: bored after a while, a wave once she likes you
+  // and your pointer's near, a glance at it, now and then phasing into the Blackwall.
+  idle(now) {
+    const sit = this.stance === 'sit';
+    const bored = now - this.lastActivity > 3 * 60 * 1000;
+    const m = this.mouse;
+    const near = m && Math.hypot(m.x - this.pos.x, m.y - (this.pos.y - 200 * this.scale)) < 450;
+    const choices = [
+      ['look', 3], ['sway', 3], ['scan', 2], ['curious', near ? 3 : 1], ['phase', 1.2],
+      ['stretch', sit ? 0 : 2], ['yawn', bored ? 3 : 0.3], ['wave', near && this.fondness >= 2 && now - (this.wavedAt || -Infinity) > 5 * 60 * 1000 ? 1.5 : 0],
+      ['hop', sit ? 0 : 0.8],
+    ].map(([n, w]) => [n, n === this.lastIdle ? 0 : w]); // never the same thing twice in a row
+    let roll = Math.random() * choices.reduce((n, [, w]) => n + w, 0);
+    const [name] = choices.find(([, w]) => (roll -= w) < 0) || choices[0];
+    this.lastIdle = name;
+    if (name === 'wave') this.wavedAt = now;
+    const toPointer = near && ['curious', 'wave'].includes(name) ? (m.x < this.pos.x ? -1 : 1) : this.towardCenter();
+    this.perform(name, toPointer);
+  }
+
+  // The Blackwall around her right now: a surge's rise, hold and fade, a twitch's flicker, and a
+  // faint hum of it while Claude works. Worked out per drawing: no timers, no extra frames.
+  wallNow(now) {
+    if (this.mode === 'sleep' || reducedMotion.matches) return 0;
+    let w = this.mode === 'work' ? 0.12 : 0;
+    const s = this.surgeAt;
+    if (s) {
+      const t = now - s.at;
+      const up = 700, down = 1500;
+      if (t >= up + s.hold + down) this.surgeAt = null;
+      else w = Math.max(w, s.peak * (t < up ? ease.out(t / up) : t < up + s.hold ? 1 : 1 - ease.inOut((t - up - s.hold) / down)));
+    }
+    if (now - this.flickAt < ON_TWOS * 2) w = Math.max(w, 0.4);
+    return w;
   }
 
   // ---------- acting ----------
@@ -621,6 +705,12 @@ export class Capri {
     this.stance = stance;
     this.perch = perch;
     this.peekSide = peekSide;
+    // the window under her watched closely (main/windows.ps1), only while she's on one
+    const seatId = stance === 'sit' && perch && perch.id !== 'taskbar' ? perch.id : 0;
+    if (seatId !== this.seatId) {
+      this.seatId = seatId;
+      this.onSeat?.(seatId);
+    }
     this.p.sit = stance === 'sit' ? 1 : 0;
     if (!SPUN.has(stance)) this.spin = 0;
     if (stance !== 'held') this.held = null;
@@ -694,6 +784,7 @@ export class Capri {
 
   twitch() {
     const p = this.p;
+    this.flickAt = performance.now();
     p.glitchSeed = Math.random() * 100;
     p.glitch = rand(0.15, 0.3);
     p.split = 2;
@@ -973,6 +1064,10 @@ export class Capri {
         break;
       case 'minds':
         this.twitch();
+        break;
+      case 'phase': // breaking up into the Blackwall: a crackle, and a few of her columns' pixels fly off
+        this.voice.play('tick', { soft: true });
+        this.fx.burst(h.x, h.y + 60 * s, { count: 6, power: 0.3, spread: 70 * s });
         break;
       case 'snap':
         this.twitch();
@@ -1573,7 +1668,9 @@ export class Capri {
   // Her intro, when she starts: she grabs your screen by its edges, huge, says hi, then her hands
   // slip and she dives down to where she stands, and her body unfolds from her face (fx.intro).
   // `still`: no motion, it comes and goes where it is (Windows' animations off).
-  async intro(at, { label = 'hi', caption = 'PROJECT CAPRICORN', still = reducedMotion.matches } = {}) {
+  // `onHi(at, seconds)`: when she says hi, where her tag would be on screen and how long her own
+  // hello sound runs (her check-in shows there in her panel, said out loud after it: app.js)
+  async intro(at, { label = 'hi', caption = 'PROJECT CAPRICORN', still = reducedMotion.matches, onHi = null } = {}) {
     const p = this.p;
     this.pos = { ...at };
     this.faceCenter();
@@ -1590,14 +1687,17 @@ export class Capri {
       label,
       caption,
       still,
-      onCue: (cue) => {
+      onCue: (cue, at) => {
         if (cue === 'open') this.voice.play('charge'); // the edges of the screen crackling
         else if (cue === 'hand') this.voice.play('land'); // a hand on the edge
         else if (cue === 'wave') this.voice.play('rise'); // a hand off it, to wave
         else if (cue === 'grab') {
           this.voice.play('land'); // she slams into it
           this.voice.play('bolt');
-        } else if (cue === 'hi') this.voice.play('hello');
+        } else if (cue === 'hi') {
+          const hello = this.voice.play('hello') || 0; // seconds of her hello sound
+          if (onHi) onHi(at, hello); // where her tag would go, on screen; how long her hello sound runs
+        }
         else if (cue === 'slip') this.voice.play('teleport-out');
       },
     });

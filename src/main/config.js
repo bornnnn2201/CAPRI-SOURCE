@@ -38,6 +38,18 @@ const DEFAULTS = {
   pcReact: true,     // she reacts to your PC: the processor at full tilt, the battery, the network, a USB stick, a game (pc.js)
   watchScreen: false, // she looks at your screen now and then and says something about it (look.js)
   lookAsked: false,  // she told you what looking means (where the picture goes) and you said yes
+  speak: false,      // she says her answers out loud (speech.js, on this PC)
+  listen: false,     // the microphone stays on for "Hey Capri" (heard on this PC, never sent anywhere)
+  ttsVoice: 'kristin', // the Piper voice she speaks with (speech.js VOICES)
+  quick: true,       // two brains: with Claude Code as her main one, a quick local one (Ollama) for what's simple
+  quickModel: 'huihui_ai/llama3.2-abliterate:3b', // that one: light (2.2 GB), refusals taken out
+  callWith: 'name',  // how you call her: 'name' ("Hey Capri", or her key) or 'key' (only Ctrl+Alt+V: Whisper idle till then)
+  hearing: 'fast',   // her ears on the processor: 'fast' (~2 s, the quick model) or 'accurate' (~6 s, the bigger one for requests)
+  gaming: false,     // gaming mode: she keeps off the screen you're playing on until you call her
+  chipStyle: 'hybrid', // her biochip's look when put away: hybrid | relic | crimson | teal | label | industrial (chips.js)
+  audience: false,   // audience mode: she hears the PC's own sound too (Discord), so your call can call her
+  voiceVolume: 1,    // her spoken voice only, 0 to 2 (her other sounds: volume)
+  glitch: 'anime',   // how broken up her voice is: 'subtle', 'anime' or 'heavy' (renderer speech.js)
 };
 
 let cache = null;

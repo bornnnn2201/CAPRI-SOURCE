@@ -19,6 +19,10 @@ export const COLORS = {
 const SHARD_PALETTE = ['red', 'red', 'red', 'red', 'ink', 'ink', 'green', 'green', 'violet', 'paper'];
 const GLYPHS = ['01', '10', '▚', '▞', '◢', '◣', '>_', '{}', '#', '⌁', '//', '0x'];
 const FRAME_MS = 1000 / 24;
+// only slow things on (shards drifting off her mane, her work glyphs): on twos. Every frame of this
+// layer is a whole new frame of her screen-sized window, so half as many is half the work.
+const LAZY_MS = 1000 / 12;
+const LAZY = new Set(['drift', 'glyph']);
 const CUTIN = { w: 360, h: 240 }; // assets/capri/cutin-*.png
 // her intro (see intro()): her close-up holding your screen by its edges
 // (assets/capri/intro-grab.webp, cut out by tools/build-intro.py), where things are on it in its
@@ -283,6 +287,11 @@ export class FxLayer {
     if (!this.running) {
       this.running = true;
       requestAnimationFrame((t) => this.frame(t));
+    } else if (this.wait && !LAZY.has(item.type)) {
+      // waiting on twos for a drifting shard: something quick starts on the next refresh instead
+      clearTimeout(this.wait);
+      this.wait = 0;
+      requestAnimationFrame((t) => this.frame(t));
     }
     return item;
   }
@@ -510,6 +519,7 @@ export class FxLayer {
     if (!rect?.()) return;
     this.add({ type: 'scan', life: FRAME_MS * 20, rect, covers });
   }
+
 
   // Heat coming off her (overheating with your processor): wavy lines rising and fading, now and then
   // a temperature with them.
@@ -815,8 +825,13 @@ export class FxLayer {
   // Whole frames at 24 fps, or every screen refresh while something that moves smoothly is on
   // (her intro: its camera moves follow the clock, its drawings still change on whole frames).
   frame(now) {
-    if (now - this.last < FRAME_MS - 2 && !this.items.some((it) => it.smooth)) {
-      requestAnimationFrame((t) => this.frame(t));
+    const step = this.items.every((it) => LAZY.has(it.type)) ? LAZY_MS : FRAME_MS;
+    if (now - this.last < step - 2 && !this.items.some((it) => it.smooth)) {
+      // not due yet: a timer to just before it, not every refresh of the screen (each wakes the page)
+      this.wait = setTimeout(() => {
+        this.wait = 0;
+        requestAnimationFrame((t) => this.frame(t));
+      }, Math.max(0, step - (now - this.last) - 6));
       return;
     }
     const dt = Math.min(0.08, (now - (this.last || now)) / 1000);
@@ -1161,6 +1176,9 @@ export class FxLayer {
   draw(it, t, dt, now) {
     const { ctx } = this;
     switch (it.type) {
+      case 'custom': // one that draws itself (hacks.js)
+        it.paint(ctx, it, now - it.born, Math.floor((now - it.born) / FRAME_MS), this);
+        break;
       case 'shard': {
         it.x += it.vx * dt;
         it.y += it.vy * dt;
@@ -1811,7 +1829,7 @@ export class FxLayer {
             }
             if (f === T.slip) for (const q of hands) this.crackle(q, { life: 240, radius: 60 });
           }
-          if (f === T.hi + 2) it.onCue('hi'); // her mouth wide open
+          if (f === T.hi + 2) it.onCue('hi', onScreen(GRAB.tag)); // her mouth wide open; where her tag goes
           if (f === T.wave) it.onCue('wave');
           if (f === T.happy) {
             it.onCue('hand'); // her hand back on the edge
@@ -1825,7 +1843,9 @@ export class FxLayer {
         // "hi" on its tag by her face, popping in, her name typed under it
         const tagAt = onScreen(GRAB.tag);
         const fs = Math.round(clamp(vh * 0.06, 40, 76));
+        // (no label: no tag, her own panel says what she has to say there, app.js)
         const hi = (k = 1, ky = 1) => {
+          if (!it.label) return;
           this.hiTag(tagAt.x, tagAt.y, it.label, fs, k, ky);
           if (it.caption && frame >= T.hi + 6 && ky === 1) {
             this.typed(tagAt.x + fs * 0.5, tagAt.y + fs * 1.15, it.caption, it.caption.slice(0, (frame - T.hi - 6) * 2), frame);

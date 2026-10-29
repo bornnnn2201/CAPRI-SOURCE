@@ -1,4 +1,5 @@
 import { Capri } from './capri.js';
+import { SPRITE } from './sprite.js';
 import { FxLayer, GRAB_FRAMES } from './fx.js';
 import { Chip, Mask } from './chip.js';
 import { Panel } from './panel.js';
@@ -6,12 +7,15 @@ import { Voice } from './voice.js';
 import { Brain } from './brain.js';
 import { Guide } from './guide.js';
 import { Mission } from './mission.js';
-import { Chat } from './chat.js';
+import { Chat, gamingWord, GAMING_LINES, quickhackOf, QUICKHACK_LINES } from './chat.js';
 import { Setup } from './setup.js';
 import { Custom } from './custom.js';
 import { Bond, Jealousy } from './bond.js';
 import { Reminders, clock } from './reminders.js';
 import { Look } from './look.js';
+import { Speech } from './speech.js';
+import { Ears } from './ears.js';
+import { screenPicture, blackwall, rebootOptics, cyberpsychosis, sandevistan, overheat, systemReset } from './hacks.js';
 import { Pc } from './pc.js';
 import { linesFor } from './lines.js';
 import { pick, fmt, reducedMotion } from './util.js';
@@ -69,6 +73,7 @@ async function boot() {
   let floorGap = config.floorGap ?? 0;
   const chip = new Chip(document.getElementById('chip'));
   chip.place(innerWidth, innerHeight - floorGap);
+  chip.setStyle(config.chipStyle); // her biochip's look (chips.js), from her menu's config
   const mask = new Mask(document.getElementById('mask'));
 
   const voice = new Voice();
@@ -138,6 +143,7 @@ async function boot() {
   };
   let lastMove = performance.now();
   let onBack = null; // (away ms) => you're back at your PC after a while (the bond, below)
+  let onPat = null; // (mousemove) => head pats (below)
   window.addEventListener('mousemove', (e) => {
     const now = performance.now();
     if (now - lastMove > AWAY_MS) onBack?.(now - lastMove);
@@ -145,6 +151,7 @@ async function boot() {
     mouse = { x: e.clientX, y: e.clientY };
     refreshHit();
     hoverChip();
+    onPat?.(e);
   });
   document.addEventListener('mouseleave', () => {
     mouse = null;
@@ -157,6 +164,10 @@ async function boot() {
   let seen = null;
   let rearmedAt = -Infinity;
   let follow = null; // (pointer) => she may follow it to another screen (below)
+  let offLimits = () => false; // (screen id) => a game's on it: she stays off it (below)
+  let quickhack = async () => false; // (hack) => her quickhacks (below)
+  let inGame = () => false;          // () => you're in a game: she answers out loud only (below)
+  let lastFg = 0;              // the last window in front of you that wasn't hers (its handle)
   setInterval(async () => {
     const at = await host.cursor().catch(() => null);
     const before = seen;
@@ -228,6 +239,17 @@ async function boot() {
   guide.setup = setup;
   guide.onTalk = () => chat.start();
   chat.onSetup = (status) => setup.chat(status);
+  // "go rest", "go away": her line said, then into her biochip like Ctrl+Alt+C
+  chat.onRest = async () => {
+    for (let i = 0; i < 80 && (speech.saying || speech.talking); i++) await wait(100);
+    await wait(500);
+    speech.hush();
+    if (capri.stowed) return;
+    chat.close();
+    host.setConfig({ visible: false }); // the tray and Ctrl+Alt+C follow
+    voice.play('bye');
+    capri.stow();
+  };
   chat.onBetterModel = () => setup.better();
   setup.onReady = () => chat.start();
   // What she calls you, how she is, your lines, what she remembers (custom.js)
@@ -251,6 +273,73 @@ async function boot() {
   const look = new Look({ capri, panel, brain, chat, guide, host, fx, voice, active: () => performance.now() - lastMove });
   look.configure(config);
   chat.look = look; // "regarde mon écran" in her chat
+  // her voice out loud and "Hey Capri" (speech.js): what you say after her name goes to her chat
+  const speech = new Speech({ host, voice, capri, panel });
+  chat.speech = speech;
+  new Ears({ speech, capri }); // LISTENING by her head while she waits for you to speak
+  let guestHackAt = -Infinity;
+  speech.onCommand = async (text, { from = 'you' } = {}) => {
+    // Audience mode: someone in your call. Her effects (one every 30 s at most, and never the short
+    // circuit: that's your game it would minimize) and the music; the rest chat.whisper keeps to talk
+    if (from === 'pc') {
+      const hack = quickhackOf(text);
+      let line = null;
+      let face = 'smug';
+      if (hack && hack !== 'short' && performance.now() - guestHackAt > 30000) {
+        guestHackAt = performance.now();
+        line = pick(QUICKHACK_LINES[(await quickhack(hack)) ? hack : 'none']);
+        chat.log('you', `[call] ${text}`);
+        chat.log('capri', line, 'capri');
+        speech.say(line);
+      } else if (hack) {
+        line = hack === 'short' ? 'Not that one. It\'d knock the game right off the screen.' : 'Give it a moment, choom. One hack at a time.';
+        speech.say(line);
+      } else {
+        const done = await chat.whisper(text, { from });
+        line = done?.line;
+        face = done?.face || face;
+      }
+      if (line && !capri.stowed && !(inGame() && screens?.current === gaming?.screen)) panel.say({ kind: 'info', face, line, hold: 6000 });
+      return;
+    }
+    // a quickhack: no chat for that either, she just does it
+    const hack = quickhackOf(text);
+    if (hack) {
+      const done = await quickhack(hack);
+      const line = pick(QUICKHACK_LINES[done ? hack : 'none']);
+      panel.say({ kind: 'info', face: 'smug', line, hold: 4500 });
+      chat.log('you', text);
+      chat.log('capri', line, 'capri');
+      return;
+    }
+    // "I'm gaming" / "I'm done gaming": no chat for that, a word and she goes (or comes back)
+    const gamingOn = text.split(/\s+/).length <= 12 ? gamingWord(text) : null;
+    if (gamingOn !== null) {
+      host.setConfig({ gaming: gamingOn });
+      voice.play(gamingOn ? 'bye' : 'hello');
+      const line = pick(gamingOn ? GAMING_LINES.on : GAMING_LINES.off);
+      panel.say({ kind: 'info', face: gamingOn ? 'smug' : 'look', line, hold: 4000 });
+      chat.log('you', text);
+      chat.log('capri', line, 'capri');
+      return;
+    }
+    // in a game: answered out loud, nothing over it (a line where she is, on your other screen)
+    if (inGame()) {
+      const done = await chat.whisper(text);
+      if (done?.line && !capri.stowed && screens?.current !== gaming?.screen) panel.say({ kind: 'info', face: done.face, line: done.line, hold: 6000 });
+      return;
+    }
+    await chat.start({ spoken: true }); // you said it: your keyboard stays in your app
+    chat.spokenAt = Date.now(); // her questions back get your answer out loud too (chat.replyWindow)
+    // her answer awaited: then she listens on for the next thing (speech.followUp)
+    if (chat.open) await chat.send(text);
+  };
+  // the conversation's over (nothing said 10 s after her answer): her chat goes too, if what you said
+  // last was out loud (typed into it meanwhile, it's yours to close) and she isn't still answering
+  speech.onConversationEnd = () => {
+    if (chat.open && !chat.turn && chat.spokenAt && chat.spokenAt >= (chat.sentAt || 0) - 500) chat.close();
+  };
+  speech.configure(config);
   // your PC as she feels it (pc.js): the processor, the battery, the network, a USB stick, a game
   const pc = new Pc({ capri, panel, brain, host, voice, chat, guide });
   pc.enabled = config.pcReact !== false;
@@ -264,6 +353,42 @@ async function boot() {
       brain.status();
       bond.add('click', 1);
     }
+  };
+
+  // Head pats: the pointer rubbed back and forth over her (4 turns inside 1.5 s, no button held). She
+  // allows it, once every 20 s at most. Only real pointer moves count, never her moving under it.
+  const PAT_LINES = [
+    'Heh. Okay. I\'ll allow it.', 'Pats logged. Morale up twelve percent.', 'Careful, choom. I bite viruses.',
+    'Mm. Don\'t make it weird.', 'Again and I start purring. Kidding. Mostly.', 'You know I\'m code, right? ...Don\'t stop.',
+    'Petting a construct. Real preem behaviour, choom.', 'Fine. Thirty more seconds of that.',
+  ];
+  const pat = { x: 0, way: 0, turns: [], at: -Infinity };
+  onPat = (e) => {
+    const now = performance.now();
+    if (e.buttons || capri.dragging || capri.busy || capri.stowed || capri.hidden || capri.dormant || chat.open || !capri.hit(e.clientX, e.clientY)) {
+      pat.turns.length = 0;
+      pat.way = 0;
+      pat.x = e.clientX;
+      return;
+    }
+    const dx = e.clientX - pat.x;
+    if (Math.abs(dx) < 6) return; // jitter
+    pat.x = e.clientX;
+    const way = Math.sign(dx);
+    if (pat.way && way !== pat.way) pat.turns.push(now);
+    pat.way = way;
+    while (pat.turns.length && now - pat.turns[0] > 1500) pat.turns.shift();
+    if (pat.turns.length < 4 || now - pat.at < 20000) return;
+    pat.turns.length = 0;
+    pat.at = now;
+    bond.add('pat', 1);
+    capri.perform('sway');
+    setTimeout(() => {
+      if (chat.open || capri.stowed || panel.visible) return;
+      const line = pick(PAT_LINES);
+      panel.say({ kind: 'info', face: 'smug', line, hold: 4500 });
+      speech.say(line);
+    }, 900);
   };
 
   // Thrown around (capri.js throwHer): she says how it was. The first time she's shaken (or she
@@ -509,7 +634,13 @@ async function boot() {
     brain.onWindows(data);
     jealousy.onWindows(data);
     pc.onWindows(data);
+    onGame(data);
+    if (!data.ours && data.fg) lastFg = data.fg;
   });
+  // the window she sits on, dragged: she rides it smoothly
+  capri.onSeat = (id) => host.watchSeat?.(id);
+  host.onSeat?.((win) => capri.followSeat(win));
+  if (capri.seatId) host.watchSeat?.(capri.seatId);
   // the windows as they are now: the watcher only speaks again when something changes
   host.windowsNow().then((data) => data && capri.setWindows(data));
 
@@ -549,7 +680,7 @@ async function boot() {
     applySize(res);
     return res;
   };
-  capri.canCross = (side, y) => Boolean(beyond(side, y));
+  capri.canCross = (side, y) => Boolean(beyond(side, y)) && !offLimits(beyond(side, y).id);
   capri.onCross = async (side, at) => {
     const there = beyond(side, at.y);
     if (!there) return null;
@@ -577,6 +708,7 @@ async function boot() {
   let followOn = config.follow !== false;
   let awayChecks = 0;
   follow = (at) => {
+    if (offLimits(at?.display)) return; // the pointer's on your game: she doesn't come over
     const elsewhere = followOn && screens && screens.list.length > 1 && at && !at.inside && at.display != null && at.display !== screens.current;
     awayChecks = elsewhere ? awayChecks + 1 : 0;
     if (awayChecks < FOLLOW_AFTER) return;
@@ -585,6 +717,231 @@ async function boot() {
     awayChecks = 0;
     goToScreen(at.display);
   };
+
+  // A game in front (one of a launcher's, or any window covering a whole screen: fullscreen, or
+  // borderless "windowed fullscreen"): she keeps off its screen, over on another one at once, never
+  // following you or wandering back there; with a single screen, put away. Talking to her (Hey
+  // Capri, her chat) brings her over until her chat closes; once you've stopped playing a while,
+  // she goes back where she was.
+  // Gaming mode ("Hey Capri, I'm gaming", her menu: config.gaming) does the same on your word, game
+  // seen or not, on the screen you're playing on, until you say you're done.
+  const GAME_GONE_MS = 8000;  // out of the game this long (not just an alt-tab): you're done playing
+  const SUMMON_MS = 15000;    // "Hey Capri" and then nothing: she goes back after this
+  let gaming = null;          // { screen, from, left, stowed, manual }
+  let lastFront = null;       // the window in front, last seen (not hers)
+  let summoned = false;
+  let summonTimer = 0;
+  offLimits = (id) => Boolean(gaming) && !summoned && id === gaming.screen;
+  const near = (a, b) => Math.abs(a - b) <= 2;
+  const screenOf = (f) => {
+    if (!f || !screens) return null;
+    const covered = screens.list.find((d) => near(f.x, d.x) && near(f.y, d.y) && near(f.w, d.w) && near(f.h, d.h));
+    if (covered) return { screen: covered, full: true };
+    const cx = f.x + f.w / 2;
+    const cy = f.y + f.h / 2;
+    return { screen: screens.list.find((d) => cx >= d.x && cx < d.x + d.w && cy >= d.y && cy < d.y + d.h), full: false };
+  };
+  const keepAway = async () => {
+    if (!gaming || summoned || !screens || screens.current !== gaming.screen) return;
+    const other = screens.list.find((d) => d.id !== gaming.screen);
+    if (other) {
+      await moveTo(other.id); // straight there: nothing of her shows on the game's screen first
+    } else if (!capri.stowed) {
+      gaming.stowed = true;
+      capri.stow();
+    }
+  };
+  // gaming mode (her menu, "I'm gaming"): only then does she keep off a game's screen, or anything
+  // fullscreen, borderless or not; off, she stays where she likes, on your main monitor to start with
+  let gamingMode = Boolean(config.gaming);
+  pc.keepAway = () => gamingMode; // pc.js puts her away for a game it sees only then too
+  const onGame = (data) => {
+    if (data.ours) return; // she's in front: you're talking to her, the game hasn't gone anywhere
+    lastFront = data.front;
+    const at = screenOf(data.front);
+    const screen = at?.full ? at.screen : data.game ? (at?.screen || screens?.list.find((d) => d.id === screens.current)) : null;
+    if (screen && gamingMode) {
+      gaming ??= { from: screens?.current, stowed: false };
+      gaming.screen = screen.id;
+      gaming.left = 0;
+      gaming.live = true; // a game in front right now
+      pc.gameAway = Boolean(screens && screens.list.length > 1);
+      keepAway();
+    } else if (gaming) {
+      gaming.live = false;
+      if (!gaming.left && !gaming.manual) gaming.left = performance.now();
+    }
+  };
+  // `back`: to the screen she was on before (else gaming mode was switched off: see setGaming)
+  const endGaming = (back = true) => {
+    const { from, stowed } = gaming;
+    gaming = null;
+    pc.gameAway = false;
+    if (stowed && capri.stowed && wantsOut) capri.unstow();
+    else if (back && from != null && screens && from !== screens.current && !summoned) goToScreen(from);
+  };
+  setInterval(() => {
+    capri.lowPower = Boolean(gaming) && !summoned && !chat.open; // waiting it out: barely drawn
+    if (!gaming?.left || gaming.manual || performance.now() - gaming.left < GAME_GONE_MS || chat.open) return;
+    endGaming();
+  }, 1000);
+  // gaming mode on: the screen you're playing on (the window in front, else your pointer's) is hers
+  // to keep off; off: done at once, game in front or not, and she's over on your main monitor (out of
+  // her chip too, if a game had put her there)
+  const setGaming = async (on) => {
+    gamingMode = on;
+    if (!on) {
+      if (gaming) endGaming(false);
+      if (pc.game?.put && capri.stowed && wantsOut) await capri.unstow();
+      await refreshScreens();
+      const main = screens?.list.find((d) => d.primary);
+      if (main && main.id !== screens.current && !capri.stowed) goToScreen(main.id);
+      return;
+    }
+    await refreshScreens();
+    const at = screenOf(lastFront)?.screen?.id ?? (await host.cursor().catch(() => null))?.display ?? screens?.current;
+    gaming = { from: screens?.current, stowed: false, ...gaming, screen: at, left: 0, manual: true };
+    pc.gameAway = Boolean(screens && screens.list.length > 1);
+    clearTimeout(summonTimer);
+    summoned = false; // you told her while she was over here: off she goes now
+    keepAway();
+  };
+  if (gamingMode) setGaming(true);
+  const release = () => {
+    clearTimeout(summonTimer);
+    if (!summoned || chat.open) return;
+    summoned = false;
+    keepAway();
+  };
+  // you called her: over to you, game or not
+  const summon = async () => {
+    clearTimeout(summonTimer);
+    summonTimer = setTimeout(release, SUMMON_MS);
+    if (!gaming) return;
+    summoned = true;
+    if (screens && screens.current !== gaming.screen) await moveTo(gaming.screen);
+    if (capri.stowed) await capri.unstow();
+  };
+  // a game in front of you and her voice on: she's a voice in your head (chat.whisper), she doesn't
+  // come over it. Typing to her, or without her voice, she comes over as ever.
+  inGame = () => Boolean(gaming && (gaming.live || gaming.manual)) && !chat.open && speech.speakOn; // a game seen, or gaming mode on
+  speech.onCalled = () => (inGame() ? undefined : summon());
+
+  // where she stands, as her picture covers it (her feet on capri.pos), for her Sandevistan echoes
+  const herNow = () => {
+    if (capri.stowed || capri.hidden || capri.dormant) return null;
+    const s = capri.scale;
+    const flip = capri.facing < 0;
+    const feetX = flip ? SPRITE.width - SPRITE.feet.x : SPRITE.feet.x;
+    return { image, x: capri.pos.x - feetX * s, y: capri.pos.y - SPRITE.feet.y * s, w: SPRITE.width * s, h: SPRITE.height * s, flip };
+  };
+
+  // Her quickhacks ("Hey Capri, use Blackwall" / "short circuit"): the Blackwall down over her
+  // screen, or the window in front of you zapped and minimized (resolves false: nothing to zap).
+  // Over to you first if she was keeping off your game's screen.
+  quickhack = async (hack) => {
+    if (gaming) {
+      await summon();
+      setTimeout(release, hack === 'short' ? 3000 : 9500); // the longest (Blackwall) runs 9 s
+    }
+    if (capri.stowed) await capri.unstow();
+    capri.wake();
+    // the big ones over your screen (hacks.js): a picture of it first, for them to bend
+    const BIG = { blackwall, optics: rebootOptics, psycho: cyberpsychosis, sandy: sandevistan, heat: overheat, reset: systemReset };
+    if (BIG[hack]) {
+      const img = await screenPicture(host);
+      voice.play(hack); // each has its sound (voice.js), or a sound of yours by that name
+      if (hack === 'sandy') {
+        // she dashes about at Sandevistan speed, and her afterimages stay where she stood (hacks.js)
+        BIG.sandy(fx, img, { her: herNow });
+        [900, 2000, 3100, 4200, 5300].forEach((ms) => setTimeout(() => capri.teleport(capri.spot('random')), ms));
+      } else {
+        BIG[hack](fx, img);
+      }
+      capri.perform('hop');
+      return true;
+    }
+    if (!lastFg) return false;
+    voice.play('quickhack');
+    const hand = capri.screenPoint(118, 232);
+    const win = capri.windows.wins.find((w) => w.id === lastFg);
+    if (win) {
+      const mid = { x: win.x + win.w / 2, y: win.y + Math.min(win.h / 2, 160) };
+      fx.bolt(hand, mid, { life: 460, forks: 3, width: 4 });
+      fx.jolt(() => capri.windows.wins.find((w) => w.id === win.id) || null, { power: 1.6 });
+      fx.crackle(mid, { life: 600 });
+    } else {
+      fx.crackle(hand, { life: 500 });
+    }
+    await new Promise((r) => setTimeout(r, 380)); // the hit lands, then it goes
+    return host.minimizeWindow(lastFg);
+  };
+  chat.onQuickhack = (hack) => quickhack(hack);
+  chat.onOpen = summon;
+  chat.onClose = release;
+
+  // Put away in her chip a while (Ctrl+Alt+C), she gets restless: at 10 and 20 minutes she asks to
+  // come out, and at 30 she lets herself out, through the Blackwall, and stretches her legs, game or
+  // no game. Not over her chat or a panel of hers, nor while Claude's waiting on you.
+  const RESTLESS = {
+    ask: [
+      ['Psst. It\'s cramped in this shard, choom. Can I come out?', 'Ten minutes in a chip. I\'ve counted every bit in here twice. Let me out?'],
+      ['Twenty minutes. My legs went numb, and they\'re not even real legs. Out?', 'Still in here. Still bored. Still asking nicely. For now.'],
+    ],
+    no: ['Fine. I\'ll just sit here. In the dark. Alone.', 'Rude. I\'m counting, you know.'],
+    out: [
+      'Nope, done waiting. Gotta stretch my legs, choom.',
+      'Thirty minutes in a shard? Even the Blackwall has more legroom. Coming through!',
+      'Told you I\'d get out. Never lock up a chip with dozens of minds in it.',
+    ],
+  };
+  const ASK_EVERY = 10 * 60 * 1000;
+  const BREAK_OUT = 30 * 60 * 1000;
+  let stowedAt = 0;
+  let asks = 0;
+  const chipSay = (line, extra = {}) => {
+    // over her chip, not where she last stood
+    panel.setAnchor({ x: chip.x + chip.w * 0.35, y: chip.y, top: chip.y - 4, lean: 1 }, capri.view);
+    panel.say({ kind: 'info', face: 'look', line, hold: 9000, ...extra });
+    speech.say(line);
+  };
+  const breakOut = async () => {
+    const line = pick(RESTLESS.out);
+    host.setConfig({ visible: true }); // the tray and Ctrl+Alt+C follow, as when you let her out
+    await quickhack('blackwall'); // the wall comes down over your screen and she's out of it
+    panel.say({ kind: 'info', face: 'laugh', line, hold: 6000 });
+    speech.say(line);
+    setTimeout(() => capri.perform('stretch'), 1200);
+  };
+  setInterval(() => {
+    const now = performance.now();
+    if (!capri.stowed) {
+      stowedAt = 0;
+      return;
+    }
+    if (!stowedAt) {
+      stowedAt = now;
+      asks = 0;
+    }
+    const free = !chat.open && !guide.running && !panel.visible && capri.mode !== 'alert';
+    if (!free) return;
+    const away = now - stowedAt;
+    if (away >= BREAK_OUT) {
+      stowedAt = 0;
+      breakOut();
+    } else if (asks < 2 && away >= ASK_EVERY * (asks + 1)) {
+      const line = pick(RESTLESS.ask[asks]);
+      asks += 1;
+      chipSay(line, {
+        actions: [{ id: 'yes', label: 'Come on out', primary: true }, { id: 'no', label: 'Stay put' }],
+        onAction: (id) => {
+          panel.hide();
+          if (id === 'yes') comeOut();
+          else chipSay(pick(RESTLESS.no), { hold: 4000 });
+        },
+      });
+    }
+  }, 15 * 1000);
   window.addEventListener('resize', () => {
     fx.resize(innerWidth, innerHeight);
     chip.place(innerWidth, innerHeight - floorGap);
@@ -592,10 +949,13 @@ async function boot() {
   });
 
   host.onConfig((cfg) => {
+    chip.setStyle(cfg.chipStyle);
     voice.configure(cfg);
+    if (Boolean(cfg.gaming) !== gamingMode) setGaming(Boolean(cfg.gaming));
     jealousy.enabled = cfg.jealous !== false;
     followOn = cfg.follow !== false;
     look.configure(cfg);
+    speech.configure(cfg);
     pc.enabled = cfg.pcReact !== false;
     wantsOut = cfg.visible !== false;
     reminders.sync(cfg.reminders); // one may have been cancelled from her menu
@@ -696,6 +1056,15 @@ async function boot() {
       case 'forget': // "Forget our conversations" in her menu, maybe with her chat open
         chat.history = [];
         break;
+      case 'listenNow': // her key, Ctrl+Alt+V: she listens to what you say next
+        speech.listenNow();
+        break;
+      case 'brainProgress': // her quick brain being set up (main.js): how far along
+        panel.say({ kind: 'info', face: cmd.done ? 'smug' : 'look', line: cmd.line, hold: cmd.done ? 9000 : 30000 });
+        break;
+      case 'voiceTest': // the test button of her voice volume window: one of her real lines, else her voice
+        if (!voice.play('hello')) speech.say(pick(t.chat.again || ['This loud enough, choom?']));
+        break;
       case 'chat': // "Talk to her" in her menu
         chat.start();
         break;
@@ -721,8 +1090,12 @@ async function boot() {
         else if (typeof guide[cmd.topic] === 'function') guide.scene(() => guide[cmd.topic]());
         break;
       case 'stow': // Ctrl+Alt+C: into her biochip, or back out
-        if (cmd.on) capri.stow();
-        else capri.unstow();
+        if (cmd.on) {
+          voice.play('bye');
+          capri.stow();
+        } else {
+          capri.unstow();
+        }
         break;
       case 'satellite': // the whole sequence, on demand (tray)
         if (capri.stowed) {
@@ -781,10 +1154,58 @@ async function boot() {
     }
   });
 
-  // entrance: her face big in the corner says hi, then she dives down to her spot
-  // (put away last time: she starts in her biochip)
+  // entrance: her face big in the corner, and as she says hi, her check-in (how you are, a question of
+  // her own each time, chat.checkInLine) in her own panel by it, said out loud; then she dives down to
+  // her spot, the panel with her, and it's her chat, for your answer. Not the first time (her welcome
+  // goes first). Put away last time: she starts in her biochip, and asks from there.
+  const checkIn = config.welcomed ? chat.checkInLine() : null;
+  let checkInSaid = false;
+  // once she's at her spot: her chat open with her question, your keyboard left alone; answer it by
+  // typing (click in) or out loud (she listens a moment for it). Not answered in 2 minutes, it closes.
+  const checkInChat = async (line, said) => {
+    if (capri.stowed) {
+      chipSay(line);
+      return;
+    }
+    await chat.start({ spoken: true, opening: line });
+    if (!chat.open) return;
+    if (!said) speech.say(line);
+    chat.spokenAt = Date.now();
+    speech.expectReply(15000);
+    const before = chat.onMessage;
+    let answered = false;
+    chat.onMessage = () => {
+      answered = true;
+      chat.onMessage = before;
+      before?.();
+    };
+    setTimeout(() => {
+      if (!answered) {
+        chat.onMessage = before;
+        if (chat.open) chat.close();
+      }
+    }, 2 * 60 * 1000);
+  };
+  // the next start's check-ins, written by her quick brain once, at a quiet moment (never in a game:
+  // it loads a model onto your card)
+  let wroteCheckIns = false;
+  const writeLater = setInterval(async () => {
+    if (wroteCheckIns) return clearInterval(writeLater);
+    if (gaming || pc.game || chat.open || capri.busy || capri.mode !== 'idle') return;
+    wroteCheckIns = true;
+    clearInterval(writeLater);
+    chat.writeCheckIns().catch(() => {});
+  }, 3 * 60 * 1000);
+  if (checkIn && config.visible !== false) speech.prepare(checkIn);
+  const onHi = checkIn && ((at, hello) => {
+    panel.resume(); // the intro holds her panels back: not this one
+    panel.setAnchor({ x: at.x, y: at.y + 30, top: at.y - 20, lean: -1 }, capri.view);
+    panel.say({ kind: 'info', face: 'laugh', line: checkIn, hold: null });
+    setTimeout(() => speech.say(checkIn), hello * 1000 + 120);
+    checkInSaid = true;
+  });
   if (config.visible === false) capri.stowNow();
-  else if (intro) await capri.intro(capri.spot('post'));
+  else if (intro) await capri.intro(capri.spot('post'), { label: checkIn ? '' : 'hi', onHi });
   else await capri.materialize(capri.spot('post'));
   // Windows has its animations off and she's following it: she barely moves. The first time, she
   // says so and asks whether to move anyway (her menu › Animations changes it later).
@@ -812,6 +1233,7 @@ async function boot() {
   const hooks = await host.hooksStatus();
   // her welcome: the first time, or while she's meant to watch Claude Code and isn't plugged into it
   if (!config.welcomed || (config.claude && !hooks.installed)) guide.welcome();
+  else if (checkIn) checkInChat(checkIn, checkInSaid);
   else panel.say({ kind: 'info', line: brain.onlineLine(), hold: 4000 });
 
   // In the evening, after a real day's work, she brings you her report card once, on her own,

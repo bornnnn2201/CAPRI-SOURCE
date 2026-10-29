@@ -15,13 +15,15 @@ const { screen } = require('electron');
 // in the installed app it sits next to the app archive (asarUnpack), where PowerShell can read it
 const SCRIPT = path.join(__dirname, 'windows.ps1').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
 
-function startWindowWatch({ overlay, onUpdate }) {
-  if (process.platform !== 'win32') return { stop() {}, refresh() {} };
+function startWindowWatch({ overlay, onUpdate, onSeat }) {
+  if (process.platform !== 'win32') return { stop() {}, refresh() {}, yours: () => null, seat() {} };
 
   let child = null;
   let stopped = false;
   let restarts = 0;
   let last = null; // the helper's last snapshot: it only speaks when something changes
+  let yours = null; // the last ordinary window you were in that isn't hers: "close this"
+  let seat = 0; // the window she sits on, watched closely by the helper
 
   const handle = overlay.getNativeWindowHandle();
   const self = handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0));
@@ -39,9 +41,16 @@ function startWindowWatch({ overlay, onUpdate }) {
       .map((w) => toOverlay(w, bounds))
       // only what overlaps Capri's screen
       .filter((w) => w.x < bounds.width && w.x + w.w > 0 && w.y < bounds.height && w.y + w.h > 0);
+    // the window in front, where it is on the whole desktop (DIP), whichever screen she's on: a game
+    // there keeps her off its screen (app.js); `ours`: the one in front is hers (you're typing to her)
+    const fgWin = last.wins.find((w) => w.id === last.fg);
+    if (fgWin && BigInt(last.fg) !== self) yours = last.fg;
+    const fgDip = fgWin && screen.screenToDipRect(null, { x: fgWin.x, y: fgWin.y, width: fgWin.w, height: fgWin.h });
     onUpdate({
       fg: last.fg, taskbar: Boolean(last.taskbar), ai: Array.isArray(last.ai) ? last.ai : [],
       game: last.game || null, usb: Array.isArray(last.usb) ? last.usb : [], plug: last.plug || null, wins,
+      front: fgDip ? { x: fgDip.x, y: fgDip.y, w: fgDip.width, h: fgDip.height } : null,
+      ours: BigInt(last.fg || 0) === self,
     });
   };
 
@@ -49,14 +58,26 @@ function startWindowWatch({ overlay, onUpdate }) {
     child = spawn('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', SCRIPT, String(self), String(process.pid),
-    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdin.on('error', () => {});
+    if (seat) child.stdin.write(`${seat}\n`);
 
     readline.createInterface({ input: child.stdout }).on('line', (line) => {
+      let data;
       try {
-        last = JSON.parse(line);
+        data = JSON.parse(line);
       } catch {
         return;
       }
+      // the window she sits on moved (being dragged): just its edge, straight to her
+      if (data.seat !== undefined) {
+        const w = last?.wins.find((x) => x.id === data.seat);
+        if (!w || overlay.isDestroyed()) return;
+        Object.assign(w, { x: data.x, y: data.y, w: data.w, h: data.h });
+        onSeat?.(toOverlay(w, overlay.getBounds()));
+        return;
+      }
+      last = data;
       send();
     });
     child.stderr.on('data', (d) => console.error('[capri] window watch:', String(d).trim()));
@@ -74,6 +95,15 @@ function startWindowWatch({ overlay, onUpdate }) {
     },
     // her window moved (another screen, the taskbar in it or not): the same windows, from there
     refresh: send,
+    // the window you're in (or were, before talking to her), if it's still there: its handle
+    yours: () => (last?.wins.some((w) => w.id === yours) ? yours : null),
+    // she sat on a window (its handle), or got off (0)
+    seat(id) {
+      const n = Number(id) || 0;
+      if (n === seat) return;
+      seat = n;
+      if (child?.stdin.writable) child.stdin.write(`${n}\n`);
+    },
   };
 }
 

@@ -1,7 +1,8 @@
 // WebGL renderer for the Capri cut-out.
 // One texture, one quad: every bit of life (head tilt, mane sway and flare, both arms, sitting with
 // dangling legs, smear frames, afterimages, line boil, speckles, the violet misregistration, glitch
-// slices, teleport collapse) is done in the fragment shader.
+// slices, teleport collapse, the Blackwall around her and her breaking up into it) is done in the
+// fragment shader.
 
 const VERT = `
 attribute vec2 aPos;
@@ -46,6 +47,9 @@ uniform vec2 uMisreg;
 uniform vec3 uRim;
 uniform float uAlpha;
 uniform float uPx; // sprite pixels per screen pixel
+uniform float uTime;  // seconds, for what streams (the Blackwall's columns)
+uniform float uWall;  // the Blackwall showing through around her, 0 to 1
+uniform float uPhase; // whole columns of her slipping out of line, 0 to 1
 
 // landmarks, in sprite pixels (capri-full.png is 240x420, see tools/build-sprite.py)
 const vec2 NECK = vec2(118.0, 152.0);   // the head tilts around this
@@ -234,8 +238,52 @@ vec4 rig(vec2 q) {
   return arms + b * (1.0 - arms.a);
 }
 
+// How much of her covers q, no colour worked out (her misregistration and afterimages only need it):
+// the same layers as rig(), at a fraction of the work.
 float rigAlpha(vec2 q) {
-  return rig(q).a;
+  vec2 qL = armLeft(q);
+  vec2 qR = armRight(q);
+  float arms = 1.0 - (1.0 - armL(qL) * tex(qL).a) * (1.0 - armL(qR) * tex(qR).a);
+  vec2 b = bend(q);
+  float body;
+  if (!legsRigged()) {
+    body = armL(b) > 0.0 ? 0.0 : tex(b).a;
+  } else {
+    float kneeY = HIP + (KNEE - HIP) * thighScale();
+    vec2 qB = unsit(b);
+    vec2 qLg = unsit(rot(b, vec2(KNEE_LX, kneeY), -uKickL));
+    vec2 qRg = unsit(rot(b, vec2(KNEE_RX, kneeY), uKickR));
+    float mid = legL(qB) + legR(qB) + armL(qB) > 0.0 ? 0.0 : tex(qB).a;
+    float l = legL(qLg) > 0.0 ? tex(qLg).a : 0.0;
+    float r = legR(qRg) > 0.0 ? tex(qRg).a : 0.0;
+    body = 1.0 - (1.0 - mid) * (1.0 - l) * (1.0 - r);
+  }
+  return 1.0 - (1.0 - arms) * (1.0 - body);
+}
+
+// The Blackwall, the way it looks: columns of square pixels in hot red and magenta streaming down,
+// runs of them with breaks, their blue printed a little to the side, all of it fading into the black
+// away from her. One column is ~3 screen pixels whatever her size, so it stays crisp.
+float columnWidth() { return max(4.0, uPx * 3.0); }
+float wallAt(vec2 p, float w) {
+  float col = floor(p.x / w);
+  if (fract(p.x / w) > 0.68) return 0.0;                               // the dark gap between columns
+  float h = hash(vec2(col, 1.7));
+  if (hash(vec2(col, floor(uTime * (0.5 + h) + h * 9.0))) < 0.5) return 0.0; // columns come and go
+  float row = floor((p.y - uTime * mix(16.0, 85.0, hash(vec2(col, 2.3)))) / (w * 1.3));
+  if (vnoise(vec2(col * 0.9, row * 0.3)) < 0.6) return 0.0;              // runs of pixels, with breaks
+  return 0.5 + 0.5 * hash(vec2(col, row));                               // each pixel its own brightness
+}
+vec4 blackwall(vec2 p) {
+  float r = length((p - vec2(118.0, 222.0)) / vec2(160.0, 262.0));
+  float halo = smoothstep(1.0, 0.6, r) * (0.4 + 0.6 * smoothstep(0.2, 0.75, r)); // strongest just off her
+  if (halo <= 0.0) return vec4(0.0);
+  float w = columnWidth();
+  float hot = wallAt(p, w);
+  float blue = wallAt(p + vec2(w * 0.45, 0.0), w) * 0.5;
+  float k = halo * uWall;
+  vec3 tint = mix(vec3(1.0, 0.1, 0.3), vec3(0.92, 0.22, 0.85), hash(vec2(floor(p.x / w), 5.1)));
+  return vec4((tint * hot + vec3(0.25, 0.35, 1.0) * blue) * k, max(hot, blue) * k);
 }
 
 // What happens to the whole drawing: the teleport collapse, glitch slices, line boil.
@@ -261,6 +309,15 @@ vec2 settle(vec2 p) {
 
 void main() {
   vec2 p = vPx;
+
+  // phasing: whole columns of her slip up or down out of line, the way the Blackwall's do
+  float broken = 0.0;
+  if (uPhase > 0.0) {
+    float w = columnWidth();
+    float col = floor(p.x / w);
+    broken = step(hash(vec2(col, floor(uGlitchSeed) + 9.0)), uPhase);
+    p.y += broken * ((hash(vec2(col, 3.3)) - 0.5) * 50.0 + sin(uTime * 6.0 + col) * 4.0) * uPhase;
+  }
 
   if (uDissolve > 0.0) {
     vec2 g = rot(p, vec2(110.0, 210.0), 0.55);
@@ -294,6 +351,14 @@ void main() {
   // impact frame: flat silhouette
   col = mix(col, uSil.rgb * a, uSil.a);
 
+  // the columns that slipped: gone to the Blackwall's red, in square pixels with dark gaps
+  if (broken > 0.0) {
+    float w = columnWidth();
+    float lit = step(fract(vPx.x / w), 0.68) * step(0.35, hash(vec2(floor(vPx.x / w), floor(vPx.y / (w * 1.3)))));
+    col = mix(vec3(1.0, 0.08, 0.26), vec3(1.0, 0.3, 0.7), hash(vec2(floor(vPx.x / w), 5.1))) * a * lit;
+    a *= lit;
+  }
+
   // afterimages: the other minds in her, a green and a red copy pulled apart
   if (uEcho != vec2(0.0)) {
     float e1 = rigAlpha(q - uEcho) * (1.0 - a);
@@ -309,6 +374,13 @@ void main() {
   col += uRim * rim;
   a += rim;
 
+  // the Blackwall showing through behind her
+  if (uWall > 0.0) {
+    vec4 bw = blackwall(vPx);
+    col += bw.rgb * (1.0 - a);
+    a += bw.a * (1.0 - a);
+  }
+
   gl_FragColor = vec4(col, a) * uAlpha;
 }`;
 
@@ -317,6 +389,7 @@ const UNIFORMS = [
   'uSit', 'uKickL', 'uKickR',
   'uSmear', 'uEcho', 'uGlitch', 'uGlitchSeed',
   'uSplit', 'uCollapse', 'uDissolve', 'uSparkle', 'uGrade', 'uSil', 'uMisreg', 'uRim', 'uAlpha', 'uPx',
+  'uTime', 'uWall', 'uPhase',
 ];
 
 export const SPRITE = {
@@ -442,6 +515,9 @@ export class SpriteRenderer {
     gl.uniform2f(u.uMisreg, s.misreg[0], s.misreg[1]);
     gl.uniform3f(u.uRim, 0.48, 0.24, 1.0);
     gl.uniform1f(u.uAlpha, s.alpha);
+    gl.uniform1f(u.uTime, (performance.now() / 1000) % 3600);
+    gl.uniform1f(u.uWall, s.wall || 0);
+    gl.uniform1f(u.uPhase, s.phase || 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }

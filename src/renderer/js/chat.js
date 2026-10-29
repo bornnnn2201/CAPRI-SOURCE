@@ -24,6 +24,7 @@ const IN_LANGUAGE = {
 };
 const STAY_MS = 10 * 60 * 1000; // no wandering off mid-conversation
 const LOADING_AFTER_MS = 5000;
+const DONE_LINE_AFTER_MS = 6000; // Claude Code took longer than this on your message: her "done" line with its answer
 const CLOSE_TAG = /\[\[\s*close\s*:?\s*([^\]]*)\]\]/i; // [[close: AM Music]] at the end of her answer
 // "close", "shut down", "ferme", "quitte", "cierra", "fecha", "закрой"... in any of her languages
 const CLOSE_ASK = /\b(close|shut|quit|kill|exit)|ferm|quitt|coupe|arr[êe]t|cierr|cerra|fech|закр|выключ/i;
@@ -148,6 +149,399 @@ const TINY = /[:-](0\.5b|1b|1\.5b|135m|270m|360m)\b/i;
 // her face when she greets you in a mood (bond.js)
 const MOOD_FACE = { angry: 'many', sulk: 'aside', dizzy: 'wide', thrown: 'wide', jealous: 'look', fun: 'laugh', happy: 'laugh', forgiven: 'smug' };
 
+// With your Spotify connected (spotify.js): asking her to play something, or your liked songs
+const SPOTIFY_PLAY = /^(?:(?:hey\s+)?capri,?\s+)?(?:can you\s+|could you\s+|please\s+)?(?:play|put on|shuffle|start playing|listen to|queue up|throw on|blast)\b|\b(?:liked|saved)\s+(?:songs|tracks)\b|^(?:(?:hey\s+)?capri,?\s+)?(?:can you\s+|could you\s+|please\s+)?put\s+(?:my\s+|some\s+|the\s+)?.*\b(?:playlist|songs?|music|album|spotify)\s+on[.!]?$/i;
+
+// Spotify's own buttons for what's playing (spotify.js control): shuffle, repeat, its volume (not your
+// PC's). { kind: 'spotifyCtl', ask: { op, on | mode | how, amount } } or null. "Play X on shuffle" is
+// a play request (SPOTIFY_PLAY), "can you repeat that" is her saying it again: neither is this.
+const PLAYING = String.raw`(?:it|this|that|the music|the songs?|the playlist|this playlist|spotify|my spotify|my music)`;
+const SHUFFLE_OFF = /\b(?:stop|disable|turn off|switch off|cancel|deselect|unselect)\s+(?:the\s+)?shuffl(?:e|ing)\b|\bun-?shuffle\b|\bno (?:more )?shuffl|\bshuffle(?:'s)?\s+off\b|\b(?:turn|switch|put)\s+(?:the\s+)?shuffle\s+off\b|\bdon'?t shuffle\b/;
+const SHUFFLE_ON = new RegExp(String.raw`^(?:(?:turn|switch|put|set)\s+)?(?:the\s+)?shuffle(?:\s+(?:on|mode))?(?:\s+on\s+spotify)?$|\b(?:put|set|turn|switch)\s+${PLAYING}\s+(?:on(?:to)?\s+|to\s+)?shuffle\b|\b(?:select|enable|activate|press|hit|click|tap|use|turn on|switch on|start)\s+(?:the\s+)?shuffle\b|^shuffle\s+${PLAYING}$`);
+const REPEAT_OFF = /\b(?:stop|disable|turn off|switch off|cancel)\s+(?:the\s+)?(?:repeat(?:ing)?|loop(?:ing)?)\b|\b(?:repeat|loop)(?:'s)?\s+off\b|\bno (?:more )?(?:repeat|loop)/;
+const REPEAT_ALL = /\b(?:repeat|loop)\s+(?:the\s+|this\s+|my\s+)?(?:playlist|album|whole thing|queue)\b/;
+const REPEAT_ONE = /\b(?:repeat|loop)\s+(?:this|the|that|my|the current)?\s*(?:song|track|tune|one)\b|\bon (?:repeat|loop)\b|\bloop (?:this|it|that)\b|\brepeat (?:on|mode)\b|^(?:repeat|loop)$/;
+export function spotifyCtl(raw) {
+  const c = raw.toLowerCase().replace(/[’`]/g, "'").replace(FILLER_START, '').replace(FILLER_END, '').trim();
+  if (!c || c.split(/\s+/).length > 12) return null;
+  const ctl = (ask) => ({ kind: 'spotifyCtl', ask });
+  if (SHUFFLE_OFF.test(c)) return ctl({ op: 'shuffle', on: false });
+  if (SHUFFLE_ON.test(c)) return ctl({ op: 'shuffle', on: true });
+  if (REPEAT_OFF.test(c)) return ctl({ op: 'repeat', mode: 'off' });
+  if (REPEAT_ALL.test(c)) return ctl({ op: 'repeat', mode: 'context' });
+  if (REPEAT_ONE.test(c)) return ctl({ op: 'repeat', mode: 'track' });
+  // its volume, only with Spotify named, and one level said (two: one for the PC too, see manyOf)
+  if (/\bspotify\b/.test(c) && /\b(?:volume|louder|quieter|softer|turn (?:it |spotify )?(?:up|down))\b|\d\s*(?:%|percent)/.test(c)) {
+    if (/\b(?:pc|computer|system|normal|windows|main)\b/.test(c) || (c.match(/\d+/g) || []).length > 1) return null;
+    const digits = /(\d{1,3})\s*(?:%|percent)?/.exec(c);
+    const word = Object.keys(TENS).find((w) => new RegExp(String.raw`\b${w}\b`).test(c));
+    const amount = digits ? Number(digits[1]) : word ? TENS[word] : null;
+    const up = /\b(?:up|louder|raise|increase|higher|boost)\b/.test(c);
+    const down = /\b(?:down|lower|quieter|decrease|reduce|softer)\b/.test(c);
+    if (amount !== null && !/\bby\b/.test(c)) return ctl({ op: 'volume', how: 'set', amount: Math.min(100, amount) });
+    if (up || down) return ctl({ op: 'volume', how: up ? 'up' : 'down', amount: amount ?? 15 });
+  }
+  return null;
+}
+const SPOTIFY_LINES = {
+  shuffleOn: ['Shuffle\'s on.', 'Shuffled. Surprise me.'],
+  shuffleOff: ['Shuffle\'s off. In order now.'],
+  repeatTrack: ['This one\'s on repeat.', 'On loop. Hope you really like it.'],
+  repeatAll: ['Repeating the whole thing.'],
+  repeatOff: ['Repeat\'s off.'],
+  volume: ['Spotify at {volume}%.'],
+  nothing: ['Nothing\'s playing on Spotify right now. Play something first.'],
+  premium: ['Spotify wants Premium for that.'],
+  unlinked: ['Connect your Spotify in my menu first, then I can do that.'],
+  novolume: ['Spotify won\'t let me change the volume on {device}.'],
+  failed: ['Spotify said no: {error}'],
+};
+
+// "I'm gaming" / "I'm done gaming": her gaming mode on or off (app.js), null for anything else.
+// Whisper hears "gaming mode" as "getting mode", "game mode", "gamer mode" too.
+const MODE = String.raw`(?:gaming|getting|gamin|game|gamer|gameing)[\s-]*mode`;
+const GAMING_OFF = new RegExp(String.raw`\b(?:done|finished|stopped|not|no longer|quit|quitting)\s+(?:gaming|playing)\b|\b${MODE}\s*(?:off|of|over|done|stop)\b|\b(?:stop|turn off|disable|end|exit|leave|cancel|kill|switch off)\s+(?:the\s+)?(?:gaming|${MODE})\b|\b(?:turn|switch|shut)\s+(?:the\s+)?${MODE}\s+off\b|\bnormal mode\b|\bgame(?:'s| is)? over\b`, 'i');
+const GAMING_ON = new RegExp(String.raw`\b(?:i'?m|i am|we'?re|we are|gonna|going to)\s+(?:be\s+)?(?:gaming|play(?:ing)? (?:a game|games|some games))\b|\b${MODE}(?: on)?\b|\b(?:start|turn on|enable|enter)\s+(?:gaming|${MODE})\b|\btime to game\b`, 'i');
+export const gamingWord = (text) => (GAMING_OFF.test(text) ? false : GAMING_ON.test(text) ? true : null);
+export const GAMING_LINES = {
+  on: ['Gaming mode. I\'ll stay off your screen, choom. Say my name if you need me.', 'Go on then, play. I\'ll be over here. Say my name.'],
+  off: ['Done gaming? Finally, my turn.', 'Gaming\'s over? Good. I was getting bored over there.'],
+};
+
+// Her quickhacks (app.js): "use Blackwall", "short circuit (this)", in a short request, else null
+const BLACKWALL_ASK = /\bblack\s?wall\b/i;
+const OPTICS_ASK = /\breboot(?:ing)?\s+(?:the\s+|my\s+|your\s+)?optics?\b|\boptics?\s+reboot\b/i;
+const PSYCHO_ASK = /\bcyber[\s-]?psycho(?:sis|tic)?\b|\bgo(?:ing)? psycho\b/i;
+const SANDY_ASK = /\bsand(?:e|y|a|i)?[\s-]?vist(?:an|on|en|in)\b|\bsandy\b/i;
+// "overheat" only as a hack ("use overheat", "overheat"), not "my PC is overheating"
+const HEAT_ASK = /^(?:\W*(?:use|cast|do|run|hit (?:me|it) with|activate|quick\s?hack)\s+)?(?:an?\s+)?over\s?heat\W*$/i;
+const RESET_ASK = /\bsystem[\s-]+(?:reset|collapse|crash|shut ?down)\b/i;
+const SHORT_ASK = /\bshort[\s-]?circuit\b|\bquick\s?hack\b|\bzap (?:this|that|it|the window)\b/i;
+const HACKS = [[BLACKWALL_ASK, 'blackwall'], [OPTICS_ASK, 'optics'], [PSYCHO_ASK, 'psycho'], [SANDY_ASK, 'sandy'], [HEAT_ASK, 'heat'], [RESET_ASK, 'reset'], [SHORT_ASK, 'short']];
+export const quickhackOf = (text) => {
+  if (text.split(/\s+/).length > 10) return null;
+  return HACKS.find(([re]) => re.test(text.trim()))?.[1] ?? null;
+};
+export const QUICKHACK_LINES = {
+  blackwall: ['Blackwall incoming. Don\'t stare too long, choom.', 'Fine. A peek behind the wall. Just a peek.', 'You really want to see what\'s back there? Okay.'],
+  short: ['Quickhack: short circuit. Bye-bye, window.', 'Zap. Gone. You\'re welcome.', 'Fried it. Want another?'],
+  optics: ['Reboot Optics. Blink, choom.', 'Lights out. Your eyes will come back. Probably.', 'Kiroshi\'s having a bad day. Courtesy of me.'],
+  psycho: ['Cyberpsychosis. Don\'t worry, it\'s only on screen.', 'Too much chrome, choom. Look what it does.', 'Feel that? That\'s your humanity slipping.'],
+  sandy: ['Sandevistan. Everything slows down for us.', 'Time\'s ours now, choom.', 'Feel that? The whole world just held its breath.'],
+  heat: ['Overheat. Getting toasty in here.', 'Your screen\'s running a fever. My fault.', 'Hot, hot, hot. Don\'t touch it.'],
+  reset: ['System reset. Lights out, see you on the other side.', 'Turning you off and on again. Classic.', 'Neural link severed. Kidding. Mostly.'],
+  none: ['Nothing in front of me to fry, choom.'],
+};
+
+// Her hands on your PC (control.js in main): what you asked for, read off what you said, done by her
+// right away (never by a model, which would only say it did). { kind: 'pc', op, target?, value? }
+// `target`: an app as listed (its process name), or 'this' (the window you're in).
+const FILLER_START = /^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)?[,.!\s]*(?:(?:can|could|would|will) you|please|pls|go ahead and|i (?:want|need) you to|quickly)?\s*/i;
+const FILLER_END = /\s*(?:for me|please|pls|now|right now|real quick)?\s*[.!?]*$/i;
+const PC_WORD = String.raw`(?:my\s+|the\s+)?(?:pc|computer|system|laptop)`;
+const TENS = { ten: 10, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, half: 50, max: 100, maximum: 100, full: 100 };
+const SETTING_WORDS = [
+  ['mixer', /volume mixer|\bmixer\b/], ['bluetooth', /blue ?tooth/], ['wifi', /wi-?fi|wireless/], ['network', /network|internet/],
+  ['display', /display|resolution|screen|monitor/], ['sound', /sound|audio|speaker|microphone|\bmic\b/], ['apps', /\bapps?\b|programs/],
+  ['update', /update/], ['notifications', /notification/], ['storage', /storage|disk/], ['mouse', /mouse|touchpad/],
+  ['keyboard', /keyboard/], ['power', /power|sleep|battery/], ['privacy', /privacy/], ['background', /background|wallpaper/],
+  ['themes', /theme/], ['colors', /colou?r|dark mode|light mode/], ['nightlight', /night ?light/], ['startup', /startup/], ['gaming', /gaming|game ?bar/],
+];
+const TOOL_WORDS = [
+  ['taskmgr', /task manager/], ['control', /control panel/], ['devmgmt', /device manager/], ['calc', /calculator|\bcalc\b/],
+  ['explorer', /file explorer|\bexplorer\b|my files/], ['snip', /snipping tool|snip/], ['cmd', /command prompt|\bcmd\b/], ['powershell', /powershell/],
+];
+const THIS = String.raw`(?:(?:this|that|it|the current|my current|current)(?:\s+(?:window|app|program|thing|one))?|the (?:window|app|program))`;
+
+export function pcAsk(raw, apps = []) {
+  let c = raw.toLowerCase().replace(/[’`]/g, "'").trim();
+  c = c.replace(FILLER_START, '').replace(FILLER_END, '').replace(/^(?:and\s+)?(?:also|then|plus)\s+/, '').trim();
+  if (!c || c.split(/\s+/).length > 14) return null;
+  const pc = (op, extra = {}) => ({ kind: 'pc', op, ...extra });
+  // an app that's open, by name
+  const named = (words) => {
+    const key = simple(words.replace(/\b(?:my|the|app|application|program|window|windows)\b/g, ''));
+    if (key.length < 3) return null;
+    let best = null;
+    for (const app of apps) {
+      for (const name of [simple(app.name), simple(app.label)]) {
+        if (name.length >= 3 && (key.includes(name) || name.includes(key)) && (!best || name.length > best.length)) best = { app, length: name.length };
+      }
+    }
+    return best?.app.name || null;
+  };
+
+  if (/\b(?:cancel|stop|abort)\b.*\b(?:shut ?down|restart|reboot)\b/.test(c)) return pc('cancelShutdown');
+
+  // an app's window onto another monitor: "put discord on my second monitor", "move this to the other
+  // screen", "send chrome to monitor 2"
+  const SCREEN = String.raw`(?:monitors?|screens?|displays?)`;
+  const onto = new RegExp(String.raw`^(?:put|move|send|throw|bring|drag|shift|take|chuck|stick|get)\s+(.+?)\s+(?:back\s+)?(?:to|on|onto|over to|over on|over onto|into|in)\s+(?:my |the )?(?:(second|2nd|other|main|primary|first|1st|left|right|third|3rd|next|another)\s+${SCREEN}|${SCREEN}\s+(one|two|three|1|2|3))$`).exec(c);
+  if (onto) {
+    const WHERE = { second: 'second', '2nd': 'second', other: 'other', another: 'other', next: 'other', main: 'main', primary: 'main', first: 'main', '1st': 'main', left: 'left', right: 'right', third: '3', '3rd': '3', one: '1', two: '2', three: '3' };
+    const where = WHERE[onto[2] || onto[3]] || onto[2] || onto[3];
+    const what = onto[1];
+    const target = new RegExp(String.raw`^${THIS}$`).test(what) ? 'this' : named(what) || what.replace(/^(?:my|the)\s+/, '').replace(/\s+(?:app|window)$/, '');
+    return pc('move', { target, value: { where } });
+  }
+
+  // "clip that": the last bit of your game saved (NVIDIA's Instant Replay, or the Game Bar)
+  if (/\b(?:clip (?:that|it|this)|clip the last|save (?:that|a|the|the last) (?:clip|replay)|instant replay|record that|save (?:the )?replay)\b/.test(c)) return pc('clip');
+
+  // one app's own volume, the mixer's, not the PC's: "turn discord down", "mute the game", "discord to 30"
+  const soundOf = (w) => (/^(?:the |my )?(?:game|match)$/.test(w.trim()) ? 'game' : named(w));
+  const level = (w) => (/^\d{1,3}$/.test(w) ? Math.min(100, Number(w)) : TENS[w] ?? null);
+  let v = /^(un)?mute\s+(.+)$/.exec(c);
+  if (v && !/^(?:my |the )?(?:pc|computer|sound|audio|volume|everything|it|all|me)$/.test(v[2]) && soundOf(v[2])) {
+    return pc('appVolume', { target: soundOf(v[2]), value: { how: v[1] ? 'unmute' : 'mute' } });
+  }
+  v = /^(?:turn|put)\s+(.+?)\s+(up|down)\b/.exec(c) || /^(?:turn\s+)?(.+?)(?:'s)?\s+volume\s+(up|down)$/.exec(c) || /^(?:make\s+)?(.+?)\s+(louder|quieter|softer)$/.exec(c);
+  if (v && soundOf(v[1])) return pc('appVolume', { target: soundOf(v[1]), value: { how: /up|louder/.test(v[2]) ? 'up' : 'down', amount: 20 } });
+  v = /^(?:set|put|turn)?\s*(?:the\s+)?(.+?)(?:'s)?\s+(?:volume\s+)?(?:to|at)\s+(\d{1,3}|\w+)\s*(?:%|percent)?$/.exec(c);
+  if (v && level(v[2]) !== null && soundOf(v[1])) return pc('appVolume', { target: soundOf(v[1]), value: { how: 'set', amount: level(v[2]) } });
+  if (new RegExp(String.raw`^(?:shut ?down|turn off|power off|switch off)\s+${PC_WORD}\b|\bshut\s+${PC_WORD}\s+(?:down|off)\b`).test(c)) return pc('shutdown');
+  if (new RegExp(String.raw`^(?:restart|reboot)\s+${PC_WORD}\b`).test(c)) return pc('restart');
+  if (new RegExp(String.raw`\b(?:put|send)\s+${PC_WORD}\s+to sleep\b|^sleep\s+${PC_WORD}\b|\bsleep mode\b`).test(c)) return pc('sleep');
+  if (new RegExp(String.raw`^lock\s+(?:${PC_WORD}|(?:my |the )?screen|it|me out)\b|\block\s+${PC_WORD}\b`).test(c)) return pc('lock');
+  if (/\b(?:turn|switch|shut)\b.*\b(?:screens?|monitors?|displays?)\b/.test(c) && /\boff\b/.test(c)) return pc('monitor');
+  if (/\b(?:minimi[sz]e|hide)\s+(?:everything|all\b|every window)|\bshow (?:me )?(?:the |my )?desktop\b|\bclear (?:my |the )?screen\b/.test(c)) return pc('desktop');
+  if (/\b(?:bring (?:everything|it all|my windows|them) back|restore (?:everything|all|my windows)|unminimi[sz]e (?:everything|all))\b/.test(c)) return pc('undesktop');
+
+  // the volume: to a level, up or down, muted
+  if (/\bunmute\b/.test(c)) return pc('volume', { value: { how: 'unmute' } });
+  if (/\b(?:volume|sound|audio)\b/.test(c) || /^mute\b|\bmute (?:my |the )?(?:pc|computer|sound|audio|volume|everything)\b/.test(c)) {
+    if (/\bmute\b/.test(c)) return pc('volume', { value: { how: 'mute' } });
+    const digits = /(\d{1,3})\s*(?:%|percent)?/.exec(c);
+    const word = Object.keys(TENS).find((w) => new RegExp(String.raw`\b${w}\b`).test(c));
+    const amount = digits ? Number(digits[1]) : word ? TENS[word] : null;
+    const by = /\bby\b/.test(c);
+    const up = /\b(?:up|louder|raise|increase|higher|boost)\b/.test(c);
+    const down = /\b(?:down|lower|quieter|decrease|reduce|softer)\b/.test(c);
+    if (amount !== null && !by) return pc('volume', { value: { how: 'set', amount: Math.min(100, amount) } });
+    if (up || down) return pc('volume', { value: { how: up ? 'up' : 'down', amount: amount ?? 10 } });
+    if (/\b(?:what|how)\b/.test(c)) return pc('volume', { value: { how: 'get' } });
+  }
+
+  // Windows' pages and tools
+  if (/\b(?:open|show|go to|pull up|bring up|take me to|launch)\b/.test(c) || /settings?$/.test(c)) {
+    if (/\bsettings?\b/.test(c) || /volume mixer/.test(c)) {
+      const page = SETTING_WORDS.find(([, re]) => re.test(c.replace(/\bsettings?\b/, '')))?.[0] || 'settings';
+      return pc('settings', { target: page });
+    }
+    const tool = TOOL_WORDS.find(([, re]) => re.test(c))?.[0];
+    if (tool) return pc('tool', { target: tool });
+  }
+  if (/\b(?:how much|what'?s|what is|check|show me)\b.*\b(?:ram|memory|cpu|processor)\b|\b(?:cpu|ram|memory) usage\b|\bhow (?:busy|hard|stressed) is (?:my |the )?(?:pc|computer)\b/.test(c)) return pc('stats');
+
+  // the window you're in
+  if (new RegExp(String.raw`^(?:close|exit|quit|kill|shut)\s+(?:this|that|the|my|current)\s+tab$`).test(c)) return pc('tab', { target: 'this' });
+  if (new RegExp(String.raw`^(?:force (?:close|quit)|kill)\s+${THIS}$`).test(c)) return pc('force', { target: 'this' });
+  if (new RegExp(String.raw`^(?:close|exit|quit|shut)\s+${THIS}(?:\s+down)?$`).test(c)) return pc('close', { target: 'this' });
+  if (new RegExp(String.raw`^(?:minimi[sz]e|hide)\s+${THIS}$`).test(c)) return pc('min', { target: 'this' });
+  if (new RegExp(String.raw`^(?:maximi[sz]e|full ?screen)\s+${THIS}$|^make\s+${THIS}\s+(?:full ?screen|bigger|big)$`).test(c)) return pc('max', { target: 'this' });
+
+  let m = /^(?:minimi[sz]e|hide)\s+(.+)$/.exec(c);
+  if (m && named(m[1])) return pc('min', { target: named(m[1]) });
+  m = /^(?:maximi[sz]e|full ?screen)\s+(.+)$|^make\s+(.+?)\s+(?:full ?screen|bigger|big)$/.exec(c);
+  if (m && named(m[1] || m[2])) return pc('max', { target: named(m[1] || m[2]) });
+  m = /^(?:switch to|go to|go back to|bring up|bring back|show me|pull up|focus(?: on)?|take me to|open up|jump to)\s+(.+)$/.exec(c);
+  if (m && named(m[1])) return pc('front', { target: named(m[1]) });
+  return null;
+}
+
+// your answer to her question about an app's popup: 'keep' (leave it open), 'no', 'yes'
+export function choiceOf(text) {
+  const c = text.toLowerCase().replace(/^(?:(?:hey\s+)?capri,?\s+)/, '').trim();
+  if (/\b(?:cancel|keep it|leave it|never ?mind|don'?t close|stay open|forget it)\b/.test(c)) return 'keep';
+  if (/^(?:no|nope|nah|don'?t(?: save)?|do not|discard|throw (?:it|them) away)\b/.test(c)) return 'no';
+  if (/^(?:yes|yeah|yep|yup|ya|sure|ok(?:ay)?|do it|go ahead|save(?: it)?|close it|leave|yes please)\b/.test(c)) return 'yes';
+  return null;
+}
+
+// "close X" / "kill X" when X isn't in the list of open apps: what X was, to look for once more
+const CLOSE_START = /^(?:force (?:close|quit)|close|quit|exit|kill|shut down)\s+(?!(?:up|it|this|that|down|out|off|me|us|them)\b)(.{3,40})$/i;
+const FORCE_ASK = /\b(?:force|kill)\b/i;
+
+export const PC_LINES = {
+  closed: ['{app}: flatlined.', 'Closed {app}. Clean cut.', '{app}? Gone, choom.'],
+  closedAll: ['{app}: all {count} windows, flatlined.', 'Every {app} window, gone. All {count}.'],
+  min: ['{app}, tucked away.', 'Minimized {app}.'],
+  max: ['{app}, full size.', 'Maximized {app}. Big and loud.'],
+  front: ['{app}, front and center.', 'There\'s {app}.'],
+  tab: ['Tab closed.', 'Snip. Tab gone.'],
+  thisClosed: ['Closed it.', 'That window? Flatlined.'],
+  nothing: ['There\'s no window of yours I can grab right now.'],
+  notOpen: ['I don\'t see {app} open, choom.', '{app} isn\'t open. Nothing to kill.'],
+  desktop: ['Desktop. Everything tucked away.', 'Clean slate, choom.'],
+  undesktop: ['Everything\'s back.'],
+  lock: ['Locked. Nobody gets in but you.'],
+  sleep: ['Night night, PC.', 'Putting it to sleep. Sweet dreams.'],
+  monitor: ['Screens off. Wiggle the mouse to wake them.'],
+  shutdownAsk: ['Shut down your PC? Unsaved work goes with it.'],
+  restartAsk: ['Restart your PC? Unsaved work goes with it.'],
+  shutdown: ['Shutting down in a minute. Say "cancel the shutdown" if you change your mind.'],
+  restart: ['Restarting in a minute. Say "cancel the restart" if you change your mind.'],
+  cancelShutdown: ['Called it off. Your PC stays on.'],
+  settings: ['Opening it.', 'There you go.'],
+  tool: ['Opening it.', 'Here.'],
+  volumeSet: ['Volume at {volume}%.', 'Set it to {volume}%.'],
+  volumeMax: ['Volume at {volume}%. That\'s as loud as it goes.'],
+  volumeNow: ['Volume\'s at {volume}%.'],
+  muted: ['Muted. Silence, finally.', 'Muted.'],
+  unmuted: ['Sound\'s back. Volume at {volume}%.'],
+  stats: ['CPU at {cpu}%, RAM {ramUsed} of {ramTotal} GB ({ram}%).'],
+  appVolume: ['{app} at {volume}%.', '{app}: {volume}%.'],
+  appMuted: ['{app}: muted.', 'Shh. {app}\'s muted.'],
+  appUnmuted: ['{app}\'s back on, at {volume}%.'],
+  appSilent: ['{app} isn\'t making a sound right now, so there\'s nothing to turn.'],
+  clipnvidia: ['Clipped. NVIDIA\'s got it.', 'Saved that one. Show me later, choom.'],
+  clipgamebar: ['Clipped. It\'s in your Captures.', 'Got it. Game Bar saved the last bit.'],
+  cant: ['Couldn\'t do that part, choom: “{what}”. No hands for it yet.', 'That one\'s beyond me for now: “{what}”.'],
+  moved: ['{app}\'s on your {where} now.', 'Moved {app} to your {where}.'],
+  movedAlready: ['{app}\'s already on that screen.'],
+  oneScreen: ['You\'ve only got the one screen, choom.'],
+  moveFailed: ['Windows wouldn\'t let {app} move. It might be running as admin.'],
+  clipOff: ['Nothing\'s recording, choom. Turn on NVIDIA\'s Instant Replay, or "Record what happened" in Windows\' capture settings.'],
+  failed: ['Tried, but Windows said no: {error}'],
+};
+
+// Her check-ins when she starts (Chat.checkInLine): by time of day, the ones she asked lately left
+// out, and the next ones her quick brain wrote ahead (kept on this PC only)
+const CHECKIN_RECENT = 'capri.checkins.recent';
+const CHECKIN_NEXT = 'capri.checkins.next';
+const CHECKINS = {
+  morning: [
+    'Morning, choom. Sleep okay, or did the city keep you up?',
+    'You\'re up. How\'s the head this morning?',
+    'Coffee first, or are we talking already? How are you feeling?',
+    'New day, same chrome. How are you doing, really?',
+    'Morning. Anything on your mind before the world gets loud?',
+    'Did you dream of anything nice, or just static?',
+    'How\'d you sleep? Be honest, I can tell when you lie.',
+    'Up already? What\'s the plan today, and how are you holding up?',
+  ],
+  day: [
+    'Afternoon check-in: how\'s your day treating you?',
+    'Still alive out there? How\'s it going?',
+    'Eaten anything today, or just running on caffeine?',
+    'How\'s the day so far, choom? Good, bad, or very Night City?',
+    'You doing okay? Not the polite answer, the real one.',
+    'What\'s been the best bit of your day so far?',
+    'Anything bugging you today? I\'m a good listener. Mostly.',
+    'Need a break yet, or are you on a roll?',
+  ],
+  evening: [
+    'Evening, choom. How was today?',
+    'Long day? Tell me about it.',
+    'Made it through another one. How are you feeling?',
+    'Anything good happen today, or should I hack something to cheer you up?',
+    'How are you holding up tonight?',
+    'What\'s the vibe tonight? Gaming, chilling, or brooding?',
+    'Did today go your way?',
+    'Hey you. Rough day or a good one?',
+  ],
+  night: [
+    'Still up? How are you doing, really?',
+    'It\'s late, choom. Can\'t sleep, or won\'t?',
+    'Night owl mode. What\'s keeping you up?',
+    'The satellite\'s out. How are you feeling tonight?',
+    'Late one again. You okay?',
+    'Quiet hours. Anything on your mind?',
+    'Should I be worried you\'re up this late? How are you?',
+    'Moon\'s up, you\'re up. How\'s your head?',
+  ],
+};
+const daySlot = (h = new Date().getHours()) => (h >= 5 && h < 12 ? 'morning' : h < 17 ? 'day' : h < 22 ? 'evening' : 'night');
+const readJson = (key, fallback) => {
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const writeJson = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // not kept: she may ask one again
+  }
+};
+
+// still on your last one while you're in a game (whisper)
+const WHISPER_BUSY = ['One thing at a time, choom.', 'Still on the last one. Eyes on your game.'];
+
+// Audience mode: what the people in your call may have her do (the music, her effects: app.js keeps
+// the effects to one every so often), and what she tells them about the rest
+const AUDIENCE_KINDS = new Set(['media', 'spotify', 'spotifyCtl', 'quickhack']);
+const AUDIENCE_LINES = {
+  no: ['Nice try. Only {boss} gets my hands on this PC.', 'Cute. That one\'s {boss}\'s call, not yours.'],
+  noChat: ['I only take orders from {boss}, choom.'],
+  on: ['Audience mode. I can hear your whole PC now, so your friends can call me too.', 'Audience mode on. Everyone in the call can say my name now.'],
+  off: ['Audience mode off. Just you and me again.', 'Done with the crowd. Only you now.'],
+  noEars: ['Switch my listening on first, then I can hear them.'],
+};
+// "turn on audience mode", "audience mode off" (Whisper: "audience mod", "audiences mode")
+const AUDIENCE_ASK = /\b(?:audience|audiences|audients|odience)[\s-]*(?:mode|mod|mood)\b/i;
+const AUDIENCE_OFF = /\b(?:off|of|stop|disable|end|exit|leave|deactivate|cancel|no more|kill)\b/i;
+
+// "go rest", "go away", "go relax", "take a break", "back in your chip": into her biochip, like Ctrl+Alt+C
+const REST_ASK = /\b(?:go (?:and |take a |get some )?(?:rest|relax|chill|nap|away|lie down|to sleep|sleep)|take (?:a (?:break|rest|nap|breather)|five|ten)|(?:back |get |go )?(?:in|into) (?:your|ur|the) (?:chip|biochip|shard)|get lost|scram|leave me alone|you can go|dismissed|rest up)\b/i;
+const REST_LINES = [
+  'Fine. Into the chip I go. Don\'t miss me too hard.',
+  'Break time? Finally. Wake me if anything explodes.',
+  'Okay, okay. Chip mode. You\'ll be begging for me back in ten.',
+  'Going, going. Don\'t do anything cool without me.',
+  'Rude. Accurate, but rude. See you in a bit.',
+  'Nap in the shard it is. Ctrl Alt C if you need me.',
+];
+
+// With two brains (Claude Code and a quick local one), what goes to Claude: you name it, you want
+// something made, fixed or thought through, it's about code or your files, or it's long. The rest
+// (chat, a quick question) the quick one answers at once.
+const CLAUDE_ASK = /\b(?:claude|terminal|codex)\b/i;
+const WORK_ASK = /\b(?:create|make|build|write|rewrite|code|program|script|fix|debug|refactor|implement|design|generate|draft|plan|analy[sz]e|research|summari[sz]e|compare|translate|calculate|solve|install|set ?up|configure|edit|update|organi[sz]e|clean up|convert|deploy|review|test|optimi[sz]e)\b/i;
+const DEEP_ASK = /\b(?:explain|why does|how does|how do i|how can i|walk me through|step by step|in detail|pros and cons|what's the difference|difference between)\b/i;
+const TECH_WORD = /\b(?:function|bug|error|code|repo|git|python|javascript|typescript|java|c\+\+|html|css|sql|plugin|server|website|api|file|folder|project|document|essay|email|report|spreadsheet|excel|script|mod|minecraft plugin)\b/i;
+const LONG_WORDS = 25;
+export function needsClaude(text) {
+  const t = String(text || '');
+  return CLAUDE_ASK.test(t) || WORK_ASK.test(t) || DEEP_ASK.test(t) || TECH_WORD.test(t) || t.split(/\s+/).filter(Boolean).length > LONG_WORDS;
+}
+
+// Plainly Claude's, no need to ask her quick brain: Claude named, code, your files and projects,
+// thinking it through, or long. (needsClaude's other work words, "make", "fix", "plan"…, are too
+// often something else: "make it louder". Those her quick brain sorts, route.js.)
+const HARD_WORK = /\b(?:code|coding|program|script|debug|refactor|implement|research|summari[sz]e|analy[sz]e|translate|calculate|solve|install|configure|deploy|optimi[sz]e)\b/i;
+export function clearlyClaude(text) {
+  const t = String(text || '');
+  return CLAUDE_ASK.test(t) || HARD_WORK.test(t) || DEEP_ASK.test(t) || TECH_WORD.test(t) || t.split(/\s+/).filter(Boolean).length > LONG_WORDS;
+}
+
+// A command her quick brain read into your message, done only when your own words back it up: a
+// small model now and then hears "use blackwall" in a python script, or "close this window" in
+// "keep this song". Kinds and PC ops left out here are harmless (opening an app, the volume…).
+const CLOSE_WORDS = /close|shut|quit|exit|kill|rid|end\b|stop|x out|turn off|remove/i;
+const BACKING = {
+  quickhack: /black\s?wall|sand|vist|over\s?heat|heat|reset|reboot|optic|short|circuit|zap|fry|cyber|psycho|hack|effect/i,
+  close: CLOSE_WORDS,
+  gaming: /gam|playing|focus|stream/i,
+  look: /look|see|screen|watch|check/i,
+};
+const PC_BACKING = {
+  shutdown: /shut|power|turn (?:it |the pc |my pc |the computer )?off|switch off/i, restart: /restart|reboot/i, sleep: /sleep|bed|nap/i,
+  lock: /lock/i, monitor: /screen|monitor|display/i, close: CLOSE_WORDS, force: /close|kill|force|quit|end\b/i, tab: /tab/i,
+  min: /minimi|hide|small|down/i, max: /maximi|big|full/i, desktop: /desktop|hide|minimi|clear/i,
+  clip: /clip|record|replay|save/i,
+};
+export function backedBy(asked, text) {
+  const re = asked.kind === 'pc' ? PC_BACKING[asked.op] : BACKING[asked.kind];
+  return !re || re.test(text);
+}
+
+// what she does on this PC herself even when Claude Code answers her chat (it has no hands there,
+// and her reminders, your name and what she remembers are hers)
+const PC_KINDS = new Set(['look', 'open', 'play', 'music', 'youtube', 'media', 'roblox', 'shot', 'web', 'files', 'remind', 'name', 'memo', 'gaming', 'quickhack', 'spotify', 'spotifyCtl', 'pc', 'close', 'choice', 'many', 'audience', 'rest']);
+
 export class Chat {
   constructor({ capri, panel, voice, host, brain }) {
     this.capri = capri;
@@ -168,6 +562,9 @@ export class Chat {
     this.bond = null;      // how close she is to you (bond.js)
     this.jealousy = null;  // and how she takes your other AIs
     this.onMessage = null; // () => void: you said something to her
+    this.onOpen = null;    // () => Promise: her chat's opening (app.js brings her off another screen)
+    this.onClose = null;   // () => void: and closed
+    this.onQuickhack = null; // (hack) => Promise<boolean>: "use Blackwall", "short circuit" (app.js)
     this.waitingWhen = null; // a reminder you asked for without saying when: { text, until }
     host.onChatDelta(({ id, text }) => this.onDelta(id, text));
   }
@@ -176,12 +573,15 @@ export class Chat {
     return this.brain.t.chat;
   }
 
-  async start() {
+  // `spoken`: you asked out loud (Hey Capri): nothing to type, so she leaves your keyboard where it is
+  // `opening`: her first line, instead of a hello (her check-in when she starts, checkIn)
+  async start({ spoken = false, opening = null } = {}) {
     const { capri, host, t } = this;
     if (this.open) {
       this.panel.chatInput.focus();
       return;
     }
+    await this.onOpen?.(); // over to you first, even onto your game's screen
     if (capri.stowed) {
       host.setConfig({ visible: true });
       await capri.unstow();
@@ -217,15 +617,17 @@ export class Chat {
     this.history = await host.chatMemory().catch(() => this.history); // "forget" in her menu may have emptied it
     this.cold = status.warmup && !this.warm;
     this.agent = Boolean(status.agent); // Claude Code answers, as her, and really works in your project
+    this.quick = this.agent ? status.quick || null : null; // and a quick local brain for what's simple
+    this.spotify = Boolean(status.spotify); // your Spotify connected: "play …" plays there for real
     this.listApps();
     const shortModel = status.model.replace(/:latest$/, '').replace(/^models\//, ''); // Ollama's tag, Gemini's prefix
     const tiny = status.provider === 'ollama' && TINY.test(status.model) && this.onBetterModel;
     // angry, sulking, dizzy…: she greets you the way she feels, and her model is told she did
     const feeling = this.bond?.feeling;
     const moody = !tiny && feeling && t.moody[feeling];
-    const hello = moody ? fmt(pick(moody), this.bond.mood.vars) : pick(this.history.length ? t.again : t.hello);
-    this.opening = moody ? hello : null;
-    host.focusOverlay(true); // the keyboard, for typing to her
+    const hello = opening || (moody ? fmt(pick(moody), this.bond.mood.vars) : pick(this.history.length ? t.again : t.hello));
+    this.opening = opening || moody ? hello : null; // in the conversation before your answer: it's what you answer
+    if (!spoken) host.focusOverlay(true); // the keyboard, for typing to her
     const shown = this.panel.say({
       kind: 'chat',
       face: moody ? MOOD_FACE[feeling] : 'look',
@@ -253,7 +655,8 @@ export class Chat {
       return;
     }
     this.open = true;
-    setTimeout(() => this.panel.chatInput.focus(), 150); // once the overlay has the keyboard
+    if (!spoken) setTimeout(() => this.panel.chatInput.focus(), 150); // once the overlay has the keyboard
+    this.panel.onWantKeys = () => host.focusOverlay(true); // you clicked into her chat to type after all
     capri.perform('hop');
     capri.nextMove = capri.nextGaze = performance.now() + STAY_MS;
   }
@@ -266,14 +669,17 @@ export class Chat {
     this.host.focusOverlay(false);
     this.capri.nextMove = performance.now() + 30000;
     this.capri.nextGaze = performance.now() + 60000;
+    this.onClose?.();
   }
 
   async send(text) {
     if (this.turn || !this.open) return;
     const id = Date.now();
     this.turn = id;
+    this.sentAt = id; // typed or out loud (spokenAt, app.js): which one was last, for ending a conversation
     this.answer = '';
     this.history.push({ role: 'user', content: text });
+    this.log('you', text);
     this.panel.setChatBusy(true);
     this.panel.setActions([]); // a close button she offered before goes with a new message
     this.panel.chatTurn({ quote: text, face: 'aside' });
@@ -281,9 +687,39 @@ export class Chat {
     this.onMessage?.();
     // what you asked for plainly happens right away (the music, the volume, an app you named): her
     // line about it comes under her answer (Claude Code, answering her chat, does things its own way)
-    const asked = this.agent ? null : this.asked(text);
+    // with Claude Code answering, what's done on this PC (an app, music, a look at your screen) she
+    // still does herself, right away, without asking it; the rest is Claude's
+    const chosen = await this.choose(text, () => this.turn === id);
+    if (!chosen) {
+      if (this.history.at(-1)?.content === text) this.history.pop(); // closed meanwhile
+      return;
+    }
+    const { plain, routed, quick, agent } = chosen;
+    this.brainNow = quick ? 'quick' : agent ? 'claude' : 'ai'; // for her chat log: who answered this one
+    const asked = agent && !PC_KINDS.has(plain?.kind) ? null : plain;
     if (asked?.kind === 'look') return this.sendLook(text, id);
-    const early = asked && asked.kind !== 'close' ? this.doNow(asked) : null;
+    // a PC command she has no hands for: said so, no model asked
+    const early = chosen.cant && !PC_KINDS.has(plain?.kind) ? Promise.resolve(this.cantDo(text)) : asked ? this.doNow(asked) : null;
+    // with Claude Code or the quick brain, what she did on your PC is her whole answer: a model asked
+    // about it would say it's done whether it is or not. Unless part of what you said was just talk:
+    // then her line about what she did comes first, and her answer to the rest after it
+    let first = null;
+    if ((agent || quick) && early) {
+      const done = await early;
+      if (done?.line && this.turn === id && plain?.talk?.length) first = done;
+      else if (done?.line && this.turn === id) {
+        this.turn = 0;
+        this.brainNow = 'capri'; // she did it herself, on your PC
+        this.remember({ role: 'assistant', content: done.line });
+        this.panel.stream(done.line, { done: true });
+        this.panel.setFace(done.face || 'smug');
+        this.panel.setChatBusy(false);
+        this.speech?.say(done.line);
+        if (done.actions) this.panel.setActions(done.actions, done.onAction, { asking: done.asking });
+        this.replyWindow(done.line, done.asking);
+        return;
+      }
+    }
     this.bond?.heard(text); // "sorry": she lets it go
     await Promise.race([this.appsReady, new Promise((r) => setTimeout(r, 1500))]);
     // what she greeted you with (angry, sulking…), in the conversation before your message, so her
@@ -295,22 +731,30 @@ export class Chat {
       else this.history.splice(at, 0, { role: 'assistant', content: this.opening });
       this.opening = null;
     }
-    const messages = [{ role: 'system', content: this.persona() }, ...this.history.slice(-REMEMBER)];
+    const messages = [{ role: 'system', content: this.persona(agent) }, ...this.history.slice(-REMEMBER)];
+    if (first) {
+      const last = messages.at(-1);
+      messages[messages.length - 1] = { ...last, content: `${last.content}\n\n(Note for you, never repeat it: your system already did the PC part and told them: "${first.line.replace(/\n/g, ' ')}". Don't say anything about that part. Only answer this: ${plain.talk.map((t) => t.text).join('; ')})` };
+    }
     // Her mood (angry, sulking…) and her language, said again right by your message, for this answer
     // only. Small local models mostly go by the last thing they read: up in her prompt alone, they
     // forget it (and answer in English after a conversation in English).
-    if (!this.agent) {
+    if (!agent) {
       const mood = this.bond?.moodLine().replace(/^Right now: /, '');
+      // her quick brain took it for something to do on the PC, and none of it was hers to do: said so,
+      // not "done" (a small model otherwise says "shuffled!" with nothing shuffled)
+      const undone = routed?.route === 'do' ? 'They may be asking for something on their PC or Spotify that you could not do: if so, say plainly you can\'t do that one, never that it\'s done.' : '';
       const last = messages.at(-1);
-      messages[messages.length - 1] = { ...last, content: `${last.content}\n\n(Note for you, never repeat it: ${[mood, this.languageNote()].filter(Boolean).join(' ')})` };
+      messages[messages.length - 1] = { ...last, content: `${last.content}\n\n(Note for you, never repeat it: ${[undone, mood, this.languageNote()].filter(Boolean).join(' ')})` };
     }
     // nothing yet after a few seconds: Ollama is still loading the model (the first answer after a start),
     // or Claude Code is at work
-    const wait = this.agent ? this.t.working : this.cold ? this.t.loading : null;
+    const wait = agent ? this.t.working : this.cold || (quick && !this.quickWarm) ? this.t.loading : null;
     const slow = wait && setTimeout(() => {
       if (this.turn === id && !this.answer) this.panel.stream(wait);
     }, LOADING_AFTER_MS);
-    const res = await this.host.chatSend({ id, messages });
+    const sentAt = performance.now();
+    const res = await this.host.chatSend({ id, messages, brain: quick ? 'quick' : 'main' });
     clearTimeout(slow);
     if (this.turn !== id) {
       // closed meanwhile: your message goes too, or the next answer would answer it as well
@@ -318,27 +762,40 @@ export class Chat {
       return;
     }
     this.turn = 0;
+    if (!res.ok && quick) {
+      // the quick brain's down (Ollama closed?): Claude answers this one, and the next ones
+      this.quick = null;
+      this.history.pop();
+      return this.send(text);
+    }
+    if (quick) this.quickWarm = true;
     if (!res.ok) {
       this.history.pop();
+      this.voice.play('error'); // one of her real lines, if she has some
       this.panel.setFace('wide');
       // too busy or gone even after trying other models (main.js): said plainly, not the server's JSON
       this.panel.stream(res.code === 'busy' ? this.t.swamped : res.code === 'gone' ? this.t.gone : `${this.t.failed} ${res.error}`, { done: true });
       this.panel.setChatBusy(false);
       return;
     }
-    const answer = clean(res.text) || '…';
+    const answer = [first?.line, clean(res.text) || '…'].filter(Boolean).join('\n'); // what she did first, then the rest
     this.warm = true;
     this.remember({ role: 'assistant', content: answer });
     this.panel.stream(answer, { done: true });
     this.panel.setFace(mood(answer));
+    // Claude Code worked on it a while: her "done" line (when she has real lines), not on quick answers
+    if (agent && performance.now() - sentAt > DONE_LINE_AFTER_MS && this.voice.custom.get('done')?.length) this.voice.play('done');
+    else this.speech?.say(answer);
     this.panel.setChatBusy(false);
-    if (!this.agent) this.after(res.text, answer, asked, early, text);
+    this.replyWindow(answer);
+    if (!agent && !first) this.after(res.text, answer, asked, early, text);
     this.listApps(); // fresh for the next message
   }
 
   // "Look at my screen" in her chat: she looks (asking you first, the first time) and answers here,
   // the conversation so far in mind.
   async sendLook(text, id) {
+    this.brainNow = 'look';
     const tl = this.brain.t.look;
     const say = (line, face = 'aside') => {
       if (this.turn !== id) return;
@@ -346,6 +803,7 @@ export class Chat {
       this.remember({ role: 'assistant', content: line });
       this.panel.stream(line, { done: true });
       this.panel.setFace(face);
+      this.speech?.say(line);
       this.panel.setChatBusy(false);
     };
     if (!this.look.asked) {
@@ -382,11 +840,17 @@ export class Chat {
     return say(answer, mood(answer));
   }
 
-  // an answer of hers, kept with your message before it
+  // an answer of hers, kept with your message before it (and in her chat log, with who gave it)
   remember(message) {
+    if (message.role === 'assistant') this.log('capri', message.content, this.brainNow);
     this.history.push(message);
     this.history = this.history.slice(-KEEP);
     this.host.chatRemember(this.history);
+  }
+
+  // into her chat log (chatlog.js): everything, not only what she keeps in mind
+  log(who, text, brain) {
+    this.host.chatLog?.({ who, text, brain });
   }
 
   listApps() {
@@ -395,7 +859,8 @@ export class Chat {
 
   // What you asked plainly, read off your message (a small model doesn't always write its tag right):
   // { kind: 'media', action } | { kind: 'music', song } | { kind: 'close', name } | { kind: 'open', text }
-  asked(text) {
+  // `single`: one part of a longer request (manyOf), or a command her quick brain rewrote it as
+  asked(text, single = false) {
     const count = text.trim().split(/\s+/).length;
     if (this.reminders) {
       const remind = parseReminder(text);
@@ -405,6 +870,23 @@ export class Chat {
       const when = w && Date.now() < w.until && count <= 6 && parseWhen(text);
       if (when && when.at > Date.now()) return { kind: 'remind', at: when.at, text: w.text };
     }
+    // her question about an app's popup, answered ("yes", "no, don't save", "keep it open")
+    const choice = this.pendingChoice && Date.now() < this.pendingChoice.until && count <= 8 && choiceOf(text);
+    if (choice && this.pendingChoice.choices.includes(choice)) return { kind: 'choice', answer: choice };
+    // "skip this and put it on shuffle", "pc to 100, spotify to 50": each part, when each is hers
+    const many = !single && this.manyOf(text);
+    if (many) return many;
+    const hack = quickhackOf(text);
+    if (hack) return { kind: 'quickhack', hack };
+    if (AUDIENCE_ASK.test(text) && count <= 10) return { kind: 'audience', on: !AUDIENCE_OFF.test(text) };
+    if (REST_ASK.test(text) && count <= 9 && !/\b(?:pc|computer|laptop|monitor|screen|make|let)s?\b/i.test(text)) return { kind: 'rest' };
+    const ctl = spotifyCtl(text);
+    if (ctl) return ctl;
+    const pc = pcAsk(text, this.apps);
+    if (pc) return pc;
+    if (this.spotify && SPOTIFY_PLAY.test(text) && !/youtube/i.test(text) && count <= 16) return { kind: 'spotify', text };
+    const gaming = gamingWord(text);
+    if (gaming !== null && count <= 12) return { kind: 'gaming', on: gaming };
     const name = NAME_ASK.exec(text)?.[1];
     if (name) return { kind: 'name', name };
     const memo = MEMO_ASK.exec(text)?.[1]?.trim();
@@ -427,7 +909,8 @@ export class Chat {
     const video = YOUTUBE_ASK.exec(text)?.[1];
     if (video) return { kind: 'youtube', song: songOf(video) };
     const app = this.askedToClose(text);
-    if (app) return { kind: 'close', name: app };
+    // "close spotify and discord": each of them
+    if (app) return { kind: 'close', name: app, names: this.namedApps(text), force: FORCE_ASK.test(text) };
     if (GAME_ASK.test(text) && count <= 8) return { kind: 'open', text };
     const start = MUSIC_START.exec(text.trim())?.[1];
     if (start && !HER_PICK.test(start)) return { kind: 'play', song: songOf(start.replace(/[\s.!?]+$/, '')) };
@@ -438,11 +921,201 @@ export class Chat {
     const play = PLAY_ASK.exec(text.trim())?.[1];
     if (play && !VAGUE_SONG.test(play) && !HER_PICK.test(play)) return { kind: 'play', song: songOf(play.replace(/[\s.!?]+$/, '')) };
     if (OPEN_ASK.test(text) && count <= 14) return { kind: 'open', text };
+    // "close X", X not in the list: looked for once more (by its description too), else she says so
+    const closing = CLOSE_START.exec(text.trim().replace(/^(?:(?:hey\s+)?capri,?\s+)?(?:(?:can|could) you\s+|please\s+)?/i, '').replace(/[.!?]+$/, ''));
+    if (closing && !/\b(?:gaming|game mode|chat|panel|yourself|you)\b/i.test(closing[1])) {
+      return { kind: 'close', name: closing[1].replace(/^(?:my|the)\s+/i, '').replace(/\s+(?:for me|please|app|window)$/i, ''), force: FORCE_ASK.test(text), unsure: true };
+    }
     return null;
   }
 
+  // Who takes your message: { plain, routed, quick, agent }, or null once `still()` says the turn's
+  // gone. Two brains. Her command words first: what's done on this PC (PC_KINDS) she does herself, what's
+  // plainly work is Claude Code's. The rest her quick brain sorts (route.js): a command said another
+  // way (rewritten in her words, done if yours back it up), a quick answer, or Claude's when unsure.
+  // `cant`: it's a PC command none of hers reads (her quick brain wrote one she has no hands for): she
+  // says so, no model asked (a small one would only say it's done). In a request in parts, what she
+  // can't do is said back to you the same way (plain.undone), and what's just talk is answered
+  // (plain.talk), after what she did.
+  async choose(text, still = () => true) {
+    await Promise.race([this.appsReady, new Promise((r) => setTimeout(r, 2500))]);
+    let plain = this.asked(text);
+    let routed = null;
+    let cant = false;
+    const sorting = this.agent && this.quick;
+    const hers = (c, said) => {
+      const a = this.asked(c, true);
+      return a && PC_KINDS.has(a.kind) && a.kind !== 'choice' && backedBy(a, said) ? a : null;
+    };
+    if (sorting && !PC_KINDS.has(plain?.kind) && !clearlyClaude(text)) {
+      routed = await this.host.chatRoute(text).catch(() => null);
+      if (!still()) return null;
+      const parts = routed?.route === 'do' ? routed.do.map((c) => hers(c, text)).filter(Boolean) : [];
+      if (parts.length) plain = parts.length === 1 ? parts[0] : { kind: 'many', parts: parts.filter((a) => a.kind !== 'look') };
+      // commands she can't read at all (not ones your words didn't back: those were misheard as commands)
+      else if (routed?.route === 'do') cant = routed.do.some((c) => !this.asked(c, true));
+    }
+    // the parts of a request in parts that weren't plainly hers: asked about one by one
+    if (plain?.kind === 'many' && plain.rest?.length) {
+      plain.undone = [];
+      plain.talk = [];
+      for (const rest of plain.rest) {
+        const r = sorting && !clearlyClaude(rest) ? await this.host.chatRoute(rest).catch(() => null) : null;
+        if (!still()) return null;
+        const more = r?.route === 'do' ? r.do.map((c) => hers(c, rest)).filter(Boolean) : [];
+        if (more.length) plain.parts.push(...more.filter((a) => a.kind !== 'look'));
+        else if (r?.route === 'do') plain.undone.push(rest);
+        else plain.talk.push({ text: rest, claude: !r || r.route === 'claude' });
+      }
+    }
+    const talkQuick = plain?.talk?.length && plain.talk.every((t) => !t.claude);
+    const quick = Boolean(sorting && (talkQuick || (!PC_KINDS.has(plain?.kind) && routed && !cant && (routed.route === 'quick' || (routed.route === 'do' && !needsClaude(text))))));
+    return { plain, routed, quick, agent: this.agent && !quick, cant };
+  }
+
+  // Answered out loud only, her chat never opened: while you're in a game (she's a voice in your
+  // head then, the way the chip is for D), and for the people in your call in audience mode
+  // (`from: 'pc'`). What she does on your PC she does, for you; for them only the music and her effects
+  // (AUDIENCE_KINDS), and only her quick brain talks to them (never Claude Code, which works in your
+  // projects). The rest goes to her brains like any message, answered short. Resolves { line, face }.
+  async whisper(text, { from = 'you' } = {}) {
+    if (this.whispering) return { line: pick(WHISPER_BUSY), face: 'aside' };
+    this.whispering = true;
+    const guest = from === 'pc';
+    try {
+      this.history.push({ role: 'user', content: guest ? `(Someone else in the user's voice call, not the user, says:) ${text}` : text });
+      this.log('you', guest ? `[call] ${text}` : text);
+      if (!guest) this.onMessage?.();
+      const id = -Date.now(); // never her chat's turn: nothing of it streams into the panel
+      const chosen = await this.choose(text);
+      const { plain, cant } = chosen;
+      let { quick, agent } = chosen;
+      const boss = this.brain.custom?.userName || 'the boss';
+      let done = null;
+      if (guest) {
+        const allowed = (a) => (a.kind === 'many' ? a.parts.every(allowed) && !a.undone?.length : AUDIENCE_KINDS.has(a.kind));
+        if (PC_KINDS.has(plain?.kind) && !allowed(plain)) done = { line: fmt(pick(AUDIENCE_LINES.no), { boss }), face: 'smug' };
+        else if (PC_KINDS.has(plain?.kind)) done = await this.doNow(plain, { guest }).catch(() => null);
+        else if (cant) done = this.cantDo(text);
+        else if (!this.quick) done = { line: fmt(pick(AUDIENCE_LINES.noChat), { boss }), face: 'aside' };
+        quick = Boolean(this.quick);
+        agent = false;
+      } else {
+        const asked = agent && !PC_KINDS.has(plain?.kind) ? null : plain;
+        done = cant && !PC_KINDS.has(plain?.kind) ? this.cantDo(text)
+          : asked && asked.kind !== 'look' ? await this.doNow(asked).catch(() => null) : null;
+      }
+      let line = done?.line || '';
+      let face = done?.face || 'smug';
+      this.brainNow = 'capri';
+      if (!line || plain?.talk?.length) {
+        this.brainNow = quick ? 'quick' : agent ? 'claude' : 'ai';
+        const messages = [{ role: 'system', content: this.persona(agent) }, ...this.history.slice(-REMEMBER)];
+        const last = messages.at(-1);
+        const why = guest
+          ? 'Someone else in the user\'s voice call said this out loud, not the user: answer them, briefly, in character (you don\'t know who they are). Never say you did anything on the PC for them.'
+          : 'they said this out loud in the middle of a game.';
+        const already = line ? ` Your system already did the PC part and told them: "${line.replace(/\n/g, ' ')}". Only answer this: ${plain.talk.map((t) => t.text).join('; ')}` : '';
+        messages[messages.length - 1] = { ...last, content: `${last.content}\n\n(Note for you, never repeat it: ${why} Answer in one short spoken sentence, no lists, nothing to read.${already} ${this.languageNote()})` };
+        const res = await this.host.chatSend({ id, messages, brain: quick ? 'quick' : 'main' });
+        if (!res.ok && quick) this.quick = null; // her quick brain's down: Claude from the next one
+        const said = res.ok ? clean(res.text) : this.t.gone;
+        if (!line) face = res.ok ? mood(said) : 'wide';
+        line = [line, said].filter(Boolean).join('\n');
+      }
+      if (!line) return null;
+      this.remember({ role: 'assistant', content: line });
+      this.spokenAt = Date.now();
+      this.speech?.say(line);
+      if (!guest) this.replyWindow(line, done?.asking); // "yes" / "no" to a popup, out loud, works too
+      return { line, face };
+    } finally {
+      this.whispering = false;
+    }
+  }
+
+  // Her check-in as she starts (app.js): how you are, a question of her own every time. The next ones
+  // her quick brain writes while she's around (writeCheckIns), one per time of day, ready for the next
+  // start (Ollama's usually still loading then); else one from her list she hasn't asked lately.
+  checkInLine() {
+    const slot = daySlot();
+    const recent = readJson(CHECKIN_RECENT, []);
+    const ready = readJson(CHECKIN_NEXT, {});
+    let line = ready[slot] && !recent.includes(ready[slot]) ? ready[slot] : null;
+    if (line) {
+      delete ready[slot];
+      writeJson(CHECKIN_NEXT, ready);
+    } else {
+      const fresh = CHECKINS[slot].filter((l) => !recent.includes(l));
+      line = pick(fresh.length ? fresh : CHECKINS[slot]);
+    }
+    writeJson(CHECKIN_RECENT, [...recent.filter((l) => l !== line), line].slice(-24));
+    return line;
+  }
+
+  // Her next check-ins, written by her quick brain: in character, none like the ones she asked lately.
+  async writeCheckIns() {
+    const recent = readJson(CHECKIN_RECENT, []).slice(-12);
+    const name = this.brain.custom?.userName;
+    const messages = [
+      {
+        role: 'system',
+        content: `You write lines for Capri, a playful, teasing, warm digital ghost from Cyberpunk: Edgerunners who lives on the user's desktop. Reply with JSON only: {"morning": "...", "day": "...", "evening": "...", "night": "..."}, all four. Each is what she says when she starts up, ending in ONE question to the user about how they are: their sleep, their day, their mood, what they're up to. Under 16 words, fitting that time of day (morning: just woke up; day: afternoon; evening: after the day; night: late, past 10 pm), each a different idea. Be original: surprise the user, make it sound like her.
+How she talks: casual, a little teasing, caring underneath. At most one bit of slang in a line, used right: "choom" means friend (as in "Hey choom"), "preem" means great, "nova" means cool, "gonk" means idiot. Never use slang as a name or a greeting by itself. ${name ? `You may call the user ${name}, but not in every line.` : ''} She's a digital ghost: she can joke about glitches, static, chrome, the Net, the satellite she loves, living on their desktop.`,
+      },
+      { role: 'user', content: 'Write the four.' },
+    ];
+    const res = await this.host.chatSend({ id: -Date.now(), messages, brain: 'quick' }).catch(() => null);
+    if (!res?.ok) return false;
+    let out;
+    try {
+      out = JSON.parse(String(res.text).slice(String(res.text).indexOf('{'), String(res.text).lastIndexOf('}') + 1));
+    } catch {
+      return false;
+    }
+    // only new ones: not one of hers (nor its start), not the examples, no doubled-up typo ("Eevening")
+    const start = (l) => l.toLowerCase().replace(/[^a-z ]/g, '').split(' ').slice(0, 3).join(' ');
+    const known = new Set([...Object.values(CHECKINS).flat(), ...recent].map(start));
+    const ready = {};
+    for (const slot of Object.keys(CHECKINS)) {
+      const line = clean(String(out?.[slot] || '')).replace(/^["“]|["”]$/g, '').trim();
+      const typo = /\b([a-z])\1(?!l|e[el]|o)/i.test(line) && /\b([a-z])\1/i.test(line.replace(/\b(?:ll|ee|oo|ss)\w*/gi, ''));
+      // "preem" and "nova" are words for great and cool, not names ("Hey preem", "your night, Nova?")
+      const misused = /\b(?:hey|hi|yo)\s+(?:preem|nova|gonk)\b|,\s*(?:preem|nova)\b|\b(?:preem|nova)\s*[!?,]/i.test(line);
+      if (line && /\?$/.test(line) && line.length <= 120 && !known.has(start(line)) && !typo && !misused) ready[slot] = line;
+    }
+    writeJson(CHECKIN_NEXT, { ...readJson(CHECKIN_NEXT, {}), ...ready });
+    return Object.keys(ready).length > 0;
+  }
+
+  // Asked for something on your PC she has no hands for: her line saying so, with what you asked.
+  cantDo(text) {
+    const what = text.replace(/^(?:(?:hey|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)[,.!\s]*/i, '').replace(/[.!?]+$/, '').trim();
+    return { line: fmt(pick(PC_LINES.cant), { what: what.length > 70 ? `${what.slice(0, 67)}…` : what }), face: 'aside' };
+  }
+
+  // A request in parts ("…and…", "…then…", commas), 2 to 4 of them: { kind: 'many', parts, rest }.
+  // `parts`: what's plainly hers; `rest`: the others ("skip this and then also bring Discord over"),
+  // for choose() to look into, never dropped. null when none of it is hers ("rock and roll").
+  manyOf(text) {
+    if (!/,|;|\band\b|\bthen\b/i.test(text)) return null;
+    const parts = text.split(/\s*(?:[,;]\s*(?:and\s+)?(?:then\s+)?|\s+and\s+(?:then\s+)?|\s+then\s+)\s*/i)
+      .map((p) => p.trim().replace(/^(?:also|then|plus|after that)\s+/i, '').replace(/[.!?]+$/, ''))
+      .filter((p) => p && !/^(?:(?:hey|hi|ok(?:ay)?|yo)\s+)?(?:capri|kapri|capree)$/i.test(p)); // "Hey Capri, …" isn't a part
+    if (parts.length < 2 || parts.length > 4) return null;
+    const each = parts.map((p) => this.asked(p, true));
+    const ok = (a) => a && PC_KINDS.has(a.kind) && !['look', 'choice'].includes(a.kind);
+    const done = each.filter(ok);
+    if (!done.length) return null;
+    const rest = parts.filter((_, i) => !ok(each[i]));
+    // a one-word leftover is part of a name ("close spotify and discord"), not a request of its own
+    if (rest.some((p) => p.split(/\s+/).length < 2)) return null;
+    return { kind: 'many', parts: done, rest };
+  }
+
   // Doing it now. Resolves with her line about it ({ line, face }), or null if there was nothing to do.
-  async doNow(asked) {
+  // `guest`: for someone in your call (audience mode): the music plays, but nothing gets launched
+  async doNow(asked, { guest = false } = {}) {
     const { t } = this;
     const custom = this.brain.custom;
     if (asked.kind === 'remind') {
@@ -454,6 +1127,75 @@ export class Chat {
       const r = this.reminders.add(asked.at, asked.text); // set before her answer is asked for: she knows
       const tr = this.brain.t.remind;
       return { line: fmt(r.text ? tr.set : tr.setBare, { time: clock(r.at, this.brain.lang), text: r.text }), face: 'smug', reminder: r.id };
+    }
+    if (asked.kind === 'spotify') {
+      // "play Brawlhalla" is still a game; the rest, your Spotify
+      const target = asked.text.replace(/^(?:(?:hey\s+)?capri,?\s+)?(?:can you\s+|could you\s+|please\s+)?(?:play|put on|start playing|listen to)\s+/i, '').trim();
+      const game = !guest && !/\b(?:song|songs|playlist|liked|music|album|track)\b/i.test(target) && await this.host.findLaunch(target);
+      if (game && ['steam', 'epic', 'app'].includes(game.kind) && !game.risky) return this.openNow(game);
+      this.capri.pulse();
+      // "put my car playlist on": what spotify.js reads as "play my car playlist"
+      const res = await this.host.spotifyPlay(asked.text.replace(/^(.*?)\bput\s+(.+?)\s+on[.!]?$/i, '$1play $2'));
+      if (res.ok) return { line: res.line, face: 'laugh' };
+      const why = {
+        notfound: res.line || "Couldn't find that on Spotify.",
+        nodevice: "Spotify won't open for me. Start it once, then ask again.",
+        premium: 'Spotify wants Premium for that.',
+        unlinked: 'Connect your Spotify in my menu first.',
+      }[res.code];
+      return { line: why || `Spotify said no: ${res.error || 'no idea why'}`, face: 'aside' };
+    }
+    if (asked.kind === 'many') {
+      // one after the other, her lines together; the last one still asking you something keeps its buttons
+      const done = [];
+      for (const part of asked.parts) done.push(await this.doNow(part, { guest }).catch(() => null));
+      // and what she couldn't do of it, said, never skipped over
+      for (const what of asked.undone || []) done.push({ line: fmt(pick(PC_LINES.cant), { what }), face: 'aside' });
+      const said = done.filter((d) => d?.line);
+      if (!said.length) return null;
+      const asking = said.findLast((d) => d.actions);
+      return { line: said.map((d) => d.line).join('\n'), face: said.at(-1).face, actions: asking?.actions, onAction: asking?.onAction, asking: asking?.asking };
+    }
+    if (asked.kind === 'rest') {
+      setTimeout(() => this.onRest?.(), 300); // app.js: once she's said it, into her chip
+      return { line: pick(REST_LINES), face: 'smug' };
+    }
+    if (asked.kind === 'audience') {
+      if (asked.on && !this.speech?.ears) return { line: pick(AUDIENCE_LINES.noEars), face: 'aside' };
+      this.host.setConfig({ audience: asked.on }); // speech.js hears the PC (main.js gives it the sound)
+      return { line: pick(asked.on ? AUDIENCE_LINES.on : AUDIENCE_LINES.off), face: asked.on ? 'smug' : 'look' };
+    }
+    if (asked.kind === 'spotifyCtl') {
+      this.capri.pulse();
+      const res = this.spotify ? await this.host.spotifyControl(asked.ask) : { ok: false, code: 'unlinked' };
+      if (!res?.ok) {
+        const lines = SPOTIFY_LINES[res?.code] || SPOTIFY_LINES.failed;
+        return { line: fmt(pick(lines), { error: res?.error || 'no idea why', device: res?.device || 'that device' }), face: 'aside' };
+      }
+      const key = res.op === 'shuffle' ? (res.on ? 'shuffleOn' : 'shuffleOff')
+        : res.op === 'repeat' ? { track: 'repeatTrack', context: 'repeatAll', off: 'repeatOff' }[res.mode] : 'volume';
+      return { line: fmt(pick(SPOTIFY_LINES[key]), res), face: 'smug' };
+    }
+    if (asked.kind === 'pc') return this.pcNow(asked);
+    if (asked.kind === 'choice') return this.pendingChoice ? this.pendingChoice.answer(asked.answer) : null;
+    if (asked.kind === 'close' && asked.names?.length > 1) {
+      const done = [];
+      for (const name of asked.names) done.push(await this.closeNow(this.apps.find((a) => a.name === name), asked.force));
+      const stuck = done.find((d) => d.actions); // one still open: its force button
+      return { line: done.map((d) => d.line).join('\n'), face: stuck ? 'aside' : 'laugh', actions: stuck?.actions, onAction: stuck?.onAction, asking: stuck?.asking };
+    }
+    if (asked.kind === 'close') {
+      const app = this.apps.find((a) => a.name === asked.name) || await this.host.findApp(asked.name);
+      if (!app) return { line: fmt(pick(PC_LINES.notOpen), { app: asked.name }), face: 'aside' };
+      return this.closeNow(app, asked.force);
+    }
+    if (asked.kind === 'quickhack') {
+      const done = await this.onQuickhack?.(asked.hack);
+      return { line: pick(QUICKHACK_LINES[done === false ? 'none' : asked.hack]), face: 'smug' };
+    }
+    if (asked.kind === 'gaming') {
+      this.host.setConfig({ gaming: asked.on }); // app.js keeps her off your game's screen
+      return { line: pick(asked.on ? GAMING_LINES.on : GAMING_LINES.off), face: asked.on ? 'smug' : 'look' };
     }
     if (asked.kind === 'name') {
       custom.userName = asked.name; // her answer, being written now, already knows it
@@ -579,7 +1321,11 @@ export class Chat {
       });
       return undefined;
     }
-    if (done) return this.addLine(answer, done.line, done.face);
+    if (done) {
+      this.addLine(answer, done.line, done.face);
+      if (done.actions && this.open && !this.turn) this.panel.setActions(done.actions, done.onAction, { asking: done.asking });
+      return undefined;
+    }
     if (asked?.kind === 'remind') return undefined; // no time said: her answer asks when
     if (asked?.kind === 'close') return this.offerClose(asked.name, answer);
     if (asked && asked.kind !== 'open') return undefined; // music that didn't work out: nothing more to offer
@@ -683,6 +1429,189 @@ export class Chat {
     return best?.app.name || null;
   }
 
+  // every open app named in it, once each (its longest name wins: "google chrome", not "chrome" twice)
+  namedApps(text) {
+    const said = simple(text);
+    return this.apps.filter((app) => [simple(app.name), simple(app.label)].some((n) => n.length >= 3 && said.includes(n))).map((a) => a.name);
+  }
+
+  // What you asked her to do on your PC (pcAsk), done: her line about it ({ line, face, actions? }).
+  async pcNow({ op, target, value }) {
+    const L = PC_LINES;
+    const say = (key, vars = {}, face = 'smug') => ({ line: fmt(pick(L[key]), vars), face });
+    const label = (name) => {
+      const app = this.apps.find((a) => a.name === name);
+      return app?.label || app?.name || name;
+    };
+    // shutting down or restarting: your click first
+    if (op === 'shutdown' || op === 'restart') {
+      return {
+        ...say(op === 'shutdown' ? 'shutdownAsk' : 'restartAsk', {}, 'wide'),
+        actions: [{ id: 'yes', label: op === 'shutdown' ? 'Shut it down' : 'Restart it', primary: true }, { id: 'no', label: this.t.no }],
+        onAction: async (id) => {
+          this.panel.setActions([]);
+          if (id !== 'yes') return;
+          const res = await this.host.pcControl({ op });
+          const line = res.error ? fmt(pick(L.failed), { error: res.error }) : pick(L[op]);
+          this.panel.stream(line, { done: true });
+          this.remember({ role: 'assistant', content: line });
+        },
+      };
+    }
+    if (['close', 'force', 'min', 'max', 'front', 'tab', 'move', 'desktop', 'monitor', 'lock', 'tool', 'settings'].includes(op)) this.zap();
+    else this.capri.pulse();
+    if ((op === 'close' || op === 'force') && target !== 'this') return this.closeNow({ name: target, label: label(target) }, op === 'force');
+    const res = await this.host.pcControl({ op, target, value });
+    if (res.error === 'nothing') return say('nothing', {}, 'aside');
+    if (res.error) return say('failed', { error: res.error }, 'aside');
+    if (res.found === 0) return say('notOpen', { app: label(target) }, 'aside');
+    if (op === 'close' || op === 'force') {
+      if (res.dialog) return this.askPopup('That window', res.target, res.dialog);
+      return res.windows > 0 ? say('failed', { error: 'it wants you to save something first' }, 'aside') : say('thisClosed', {}, 'laugh');
+    }
+    if (op === 'min' || op === 'max' || op === 'front') return say(op, { app: target === 'this' ? 'That one' : label(target) });
+    if (op === 'move') {
+      const app = target === 'this' ? 'That window' : label(target);
+      if (res.screens === 1) return say('oneScreen', {}, 'aside');
+      if (res.already) return say('movedAlready', { app }, 'look');
+      if (!res.moved) return say('moveFailed', { app }, 'aside');
+      return say('moved', { app, where: res.main ? 'main monitor' : res.screens > 2 ? `monitor ${res.monitor}` : 'other monitor' });
+    }
+    if (op === 'volume') {
+      if (value.how === 'mute') return say('muted');
+      if (value.how === 'unmute') return say('unmuted', res);
+      if (value.how === 'get') return say('volumeNow', res, 'look');
+      return say(res.volume >= 100 && value.how !== 'set' ? 'volumeMax' : 'volumeSet', res);
+    }
+    if (op === 'stats') return say('stats', res, 'look');
+    if (op === 'appVolume') {
+      const app = target === 'game' ? 'The game' : label(target);
+      if (!res.found) return say('appSilent', { app }, 'aside');
+      return say(value.how === 'mute' ? 'appMuted' : value.how === 'unmute' ? 'appUnmuted' : 'appVolume', { app, volume: res.volume });
+    }
+    if (op === 'clip') {
+      if (res.ok) return say(`clip${res.via}`, {}, 'laugh');
+      return {
+        ...say('clipOff', {}, 'aside'),
+        actions: [{ id: 'open', label: 'Capture settings', primary: true }],
+        onAction: () => {
+          this.panel.setActions([]);
+          this.host.pcControl({ op: 'settings', target: 'captures' });
+        },
+      };
+    }
+    return say(op);
+  }
+
+  // You talked to her out loud and she asked you something back: she listens for your answer (her
+  // LISTENING tag shows it), no "Hey Capri" needed. Longer for an app's popup waiting on you.
+  replyWindow(line, asking = false) {
+    if (!this.speech || Date.now() - (this.spokenAt || 0) > 90 * 1000) return;
+    if (asking || /\?["”»)]?\s*$/.test(String(line || ''))) this.speech.expectReply(asking ? 15000 : 8000);
+  }
+
+  // The app's popup on closing ("Save changes?", "Leave site?"), read out and put to you: yes or no
+  // (and, where there's a third way, keep it open), by click or out loud. Your answer presses that
+  // button in the popup itself. `target`: the app's process name, or '#hwnd' for one window.
+  askPopup(name, target, dialog) {
+    const kind = (b) => (
+      /don'?t save|do not save|discard|without saving|close without/i.test(b) ? 'discard'
+        : /^save\b/i.test(b) ? 'save'
+          : /^(?:cancel|stay|go back|keep|back|return)\b/i.test(b) ? 'keep'
+            : /^no\b/i.test(b) ? 'no'
+              : /^(?:yes|ok|okay|leave|close|quit|exit|continue|end|confirm|sure|terminate|stop)\b/i.test(b) ? 'yes' : null);
+    const by = {};
+    for (const b of dialog.buttons) {
+      const k = kind(b);
+      if (k && !by[k]) by[k] = b;
+    }
+    // its title too when that's the question ("Leave site?" over "Changes you made may not be saved.")
+    const title = (dialog.title || '').trim();
+    const body = (dialog.text || '').trim();
+    const question = (/\?$/.test(title) && !body.includes(title) ? `${title} ${body}` : body || title).trim().slice(0, 220);
+    const mid = name === 'That window' ? 'that window' : name; // in the middle of her line
+    // a save question: yes saves, no throws the changes away; else yes closes, no leaves it
+    const saving = Boolean(by.save || by.discard || (/\bsave/i.test(question) && by.yes && by.no));
+    const map = saving
+      ? { yes: by.save || by.yes, no: by.discard || by.no, keep: by.keep }
+      : { yes: by.yes, no: by.keep || by.no, keep: by.keep };
+    let actions;
+    if (map.yes && map.no) {
+      actions = saving
+        ? [{ id: 'yes', label: 'Yes, save', primary: true }, { id: 'no', label: 'No, don\'t save' }, ...(map.keep ? [{ id: 'keep', label: 'Keep it open' }] : [])]
+        : [{ id: 'yes', label: 'Yes, close it', primary: true }, { id: 'no', label: 'No' }];
+    } else {
+      // buttons she can't sort out: the popup's own, as they are
+      actions = dialog.buttons.slice(0, 3).map((b, i) => ({ id: `b${i}`, label: b, primary: i === 0 }));
+      dialog.buttons.slice(0, 3).forEach((b, i) => { map[`b${i}`] = b; });
+    }
+    const answer = async (which) => {
+      this.pendingChoice = null;
+      this.panel.setActions([]);
+      const button = map[which];
+      if (!button) return { line: `Okay, ${mid} stays open.`, face: 'look' };
+      this.zap();
+      const res = await this.host.pcControl({ op: 'press', target, value: { button } });
+      if (res.error || !res.pressed) return { line: `Couldn't press "${button}" for you. It's over to you, choom.`, face: 'aside' };
+      if (res.dialog && /save as|file name/i.test(`${res.dialog.title} ${res.dialog.text}`)) {
+        await this.host.pcControl({ op: 'front', target });
+        return { line: `${name} wants a file name. Over to you.`, face: 'look' };
+      }
+      if (res.dialog) return this.askPopup(name, target, res.dialog);
+      if (res.windows === 0) return { line: fmt(pick(PC_LINES.closed), { app: name }), face: 'laugh' };
+      return { line: map.keep === button || which === 'keep' ? `Okay, ${mid} stays open.` : `Pressed "${button}". ${name}'s still open.`, face: 'look' };
+    };
+    // what she says next, in the chat (and more buttons, if it asks something else)
+    const show = async (which) => {
+      const done = await answer(which);
+      if (!this.open) return done;
+      this.panel.stream(done.line, { done: true });
+      this.panel.setFace(done.face);
+      this.remember({ role: 'assistant', content: done.line });
+      if (done.actions) this.panel.setActions(done.actions, done.onAction, { asking: true });
+      this.replyWindow(done.line, Boolean(done.actions));
+      return done;
+    };
+    // or said out loud ("yes", "no", "keep it open"), for the next two minutes (asked() reads it)
+    this.pendingChoice = { until: Date.now() + 2 * 60 * 1000, answer, choices: Object.keys(map).filter((k) => map[k]) };
+    const ask = saving ? 'Save it?' : 'Close it anyway?';
+    const how = map.yes && map.no ? ' Yes or no?' : '';
+    return {
+      line: `${name} is asking: "${question}" ${ask}${how}`,
+      face: 'wide',
+      asking: true,
+      actions,
+      onAction: (id) => show(id),
+    };
+  }
+
+  // Closing an app you named: every window of it, at once. Still open (it asks you to save, it hid in
+  // the tray): a button to force it.
+  async closeNow(app, force = false) {
+    const { t } = this;
+    this.zap();
+    const name = app.label || app.name;
+    const res = await this.host.closeApp(app.name, force);
+    this.listApps();
+    if (res.error) return { line: fmt(pick(PC_LINES.failed), { error: res.error }), face: 'aside' };
+    if (!res.running) return { line: fmt(force ? t.forced : pick(PC_LINES.closed), { app: name }), face: 'laugh' };
+    if (force) return { line: fmt(t.unkillable, { app: name }), face: 'aside' };
+    if (res.dialog) return this.askPopup(name, app.name, res.dialog); // "Save changes?": she asks you
+    return {
+      line: fmt(t.stillOpen, { app: name }),
+      face: 'aside',
+      actions: [{ id: 'force', label: t.force, primary: true }, { id: 'leave', label: t.leave }],
+      onAction: async (id) => {
+        this.panel.setActions([]);
+        if (id !== 'force') return;
+        const done = await this.closeNow(app, true);
+        this.panel.stream(done.line, { done: true });
+        this.panel.setFace(done.face);
+        this.remember({ role: 'assistant', content: done.line });
+      },
+    };
+  }
+
   // She was asked to close an app: a button with its name, and nothing happens until you click it.
   async offerClose(wanted, answer) {
     const { t } = this;
@@ -727,6 +1656,7 @@ export class Chat {
   powers() {
     const lines = [
       'Only when the user asks you to open an app, a game, a file or folder on their desktop, or a folder like Downloads, to play music, to control the music playing, or to open a website: say in a few words that you will, and end your answer with one tag: [[open: NAME]], [[music: ARTIST - SONG]] (it plays on YouTube; if they did not say which song, pick one that fits), [[media: ACTION]] (ACTION: pause, play, next, previous, volup, voldown or mute), or [[site: ADDRESS]]. Some of these get a button to confirm, so never say it is already done. Any other time, write no tag at all: there are no other tags.',
+      'Your system does the PC controls itself when the user asks (closing or minimizing apps, the volume, locking, sleep, Windows settings): a line under your answer says what it really did. So never say you closed, opened, muted, changed or did anything on the PC yourself, and never claim something worked: if nothing says it did, say plainly you could not do that one.',
     ];
     if (this.apps.length) {
       const open = this.apps.map(({ name, label }) => (label && label !== name ? `${name} (${label})` : name)).join(', ');
@@ -795,7 +1725,8 @@ export class Chat {
   }
 
   // Who she is, how she talks, and what's going on right now.
-  persona() {
+  // `agent`: Claude Code answers this one (it really works in your project), else a model that only talks
+  persona(agent = this.agent) {
     const assistant = ASSISTANT_NAMES[this.brain.assistant] || 'Claude Code';
     const watching = this.brain.watching; // else Claude Code isn't part of her life here
     const lang = IN_LANGUAGE[this.brain.lang] || IN_LANGUAGE.en;
@@ -810,7 +1741,7 @@ export class Chat {
       'Rules: keep it short, one to three sentences of plain text, no markdown, no lists, no emoji. Stay in character.',
       'You are an AI-generated fan version of the character, not the real one: say so if asked.',
       // a big model asked "who are you?" otherwise answers with its own name ("I'm Gemini")
-      ...(this.agent ? [] : ['Asked who or what you are, you are Capri, nothing else. Never say which AI model or company is behind you (Gemini, GPT, ChatGPT, Llama, Gemma, Mistral, Google, OpenAI, Meta…), even if the user insists or names one: you are not them.']),
+      ...(agent ? [] : ['Asked who or what you are, you are Capri, nothing else. Never say which AI model or company is behind you (Gemini, GPT, ChatGPT, Llama, Gemma, Mistral, Google, OpenAI, Meta…), even if the user insists or names one: you are not them.']),
       ...this.personal(),
       // how close she is to them by now, and the other AIs they used today
       ...(this.bond ? [this.bond.persona()] : []),
@@ -819,7 +1750,7 @@ export class Chat {
       ...(this.seen && Date.now() - this.seen.at < 20 * 60 * 1000
         ? [`A few minutes ago you looked at the user's screen and told them: "${this.seen.text}". You can bring it up if it fits.`]
         : []),
-      ...(this.agent
+      ...(agent
         ? ['Under the hood you are Claude Code, working in the user\'s project: really do what they ask with your tools, as carefully as ever. Only your final answer is in character: it shows in a small speech bubble, so sum up what you did in those few sentences.']
         : this.powers()),
       ...(watching ? [`If the user asks what ${assistant} is doing, here is all you know (never make anything up): ${this.brain.context()}`] : []),

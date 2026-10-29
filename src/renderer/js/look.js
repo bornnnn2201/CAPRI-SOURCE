@@ -105,6 +105,7 @@ export class Look {
 
   // her eyes on the window in front (or the whole screen) while a scanline sweeps it
   effect() {
+    this.voice.play('look'); // one of her real lines, if you gave her some
     const { wins, fg } = this.capri.windows;
     const win = wins.find((w) => w.id === fg && !w.max);
     const { w, floor } = this.capri.view;
@@ -151,6 +152,7 @@ export class Look {
       if (!text) return;
       this.chat.seen = { text, at: Date.now() };
       this.panel.say({ kind: 'info', badge: 'SCAN', face: mood(text), line: text, hold: Math.min(13000, Math.max(5000, 2500 + text.length * 55)) });
+      this.chat.speech?.say(text);
     } finally {
       this.looking = false;
     }

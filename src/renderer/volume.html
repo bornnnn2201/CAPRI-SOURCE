@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'">
+  <title>Capri — voice volume</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; padding: 18px 20px; background: #14101c; color: #e9e4f5;
+      font: 13px/1.4 "JetBrains Mono", Consolas, monospace; user-select: none;
+    }
+    .label { display: flex; justify-content: space-between; letter-spacing: .12em; text-transform: uppercase; font-size: 11px; color: #a79fc0; }
+    .label b { color: #ff2e88; font-weight: 600; letter-spacing: 0; font-size: 13px; }
+    input[type=range] { width: 100%; margin: 14px 0 16px; accent-color: #8a4dff; height: 22px; }
+    .row { display: flex; gap: 8px; }
+    button {
+      flex: 1; padding: 8px 10px; border: 0; background: #2a2238; color: #e9e4f5; cursor: pointer;
+      font: inherit; text-transform: uppercase; letter-spacing: .08em; font-size: 11px;
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    }
+    button.primary { background: #8a4dff; }
+    button:hover { filter: brightness(1.15); }
+    button:focus-visible, input:focus-visible { outline: 2px solid #ff2e88; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="label"><span>Her voice</span><b id="pct">100%</b></div>
+  <input id="slider" type="range" min="0" max="200" step="5" value="100" aria-label="Her voice volume">
+  <div class="row">
+    <button id="test" class="primary">Test her voice</button>
+    <button id="reset">100%</button>
+  </div>
+  <script type="module" src="js/volume.js"></script>
+</body>
+</html>

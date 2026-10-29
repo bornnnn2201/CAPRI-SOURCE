@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'">
+  <title>Capri — Spotify</title>
+  <style>
+    :root { color-scheme: dark; --bg: #14101c; --line: #2e2540; --ink: #e9e4f5; --dim: #a79fc0; --green: #1ed760; --red: #ff2152; --violet: #8a4dff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 18px 20px; background: var(--bg); color: var(--ink); font: 14px/1.55 "Segoe UI", system-ui, sans-serif; }
+    h1 { margin: 0 0 4px; font: 700 18px "Chakra Petch", sans-serif; letter-spacing: .08em; color: var(--green); }
+    p { margin: 6px 0; color: var(--dim); }
+    ol { padding-left: 20px; margin: 10px 0 14px; }
+    li { margin: 6px 0; }
+    code { background: #221b30; padding: 2px 6px; font: 13px "JetBrains Mono", monospace; color: #fff; user-select: all; }
+    .row { display: flex; gap: 8px; margin: 10px 0; }
+    input { flex: 1; min-width: 0; padding: 8px 10px; background: #0e0b14; color: var(--ink); border: 1px solid var(--line); font: 13px "JetBrains Mono", monospace; }
+    button { padding: 8px 14px; border: 0; background: #2a2238; color: var(--ink); cursor: pointer; font: 600 12px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
+    button.go { background: var(--green); color: #06150b; }
+    button:hover { filter: brightness(1.15); }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+    #status { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--line); color: var(--dim); }
+    #status.ok { border-color: var(--green); color: var(--ink); }
+    #status.bad { border-color: var(--red); color: #ffb3c4; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Spotify</h1>
+  <p>So she can really play things: your liked songs, playlists, artists, songs. Premium needed. Once, about a minute:</p>
+  <div id="setup">
+    <ol>
+      <li><button id="dashboard">Open Spotify's developer page</button> and log in with your Spotify account.</li>
+      <li>Click <b>Create app</b>. Name it <b>Capri</b> (any description).</li>
+      <li>Under <b>Redirect URIs</b>, add exactly <code id="redirect">http://127.0.0.1:47834/callback</code> <button id="copy">Copy</button></li>
+      <li>Tick <b>Web API</b>, agree, <b>Save</b>.</li>
+      <li>Open the app's <b>Settings</b>, copy its <b>Client ID</b> and paste it here:</li>
+    </ol>
+    <div class="row">
+      <input id="client" placeholder="Client ID (32 letters and digits)" aria-label="Spotify Client ID" spellcheck="false">
+      <button id="paste">Paste</button>
+      <button id="connect" class="go">Connect</button>
+    </div>
+    <p>Your browser opens on Spotify: press <b>Agree</b>. Only this PC keeps the sign-in, encrypted.</p>
+  </div>
+  <div id="done" hidden>
+    <p>Connected. Ask her: "play my liked songs from the top", "play a Juice WRLD playlist", "play me a Juice WRLD song", "play Lucid Dreams by Juice WRLD".</p>
+    <div class="row"><button id="disconnect">Disconnect</button></div>
+  </div>
+  <div id="status" hidden></div>
+  <script type="module" src="js/spotify-window.js"></script>
+</body>
+</html>

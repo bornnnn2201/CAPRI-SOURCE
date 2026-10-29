@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:">
+  <title>Capri — chat log</title>
+  <style>
+    :root { color-scheme: dark; --bg: #14101c; --panel: #1d1728; --line: #2e2540; --ink: #e9e4f5; --dim: #a79fc0; --red: #ff2152; --violet: #8a4dff; --green: #36ff7a; --blue: #3d6bff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    header { display: flex; gap: 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    header h1 { margin: 0 8px 0 0; font: 700 15px "Chakra Petch", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--red); white-space: nowrap; }
+    input[type=search] { flex: 1; min-width: 0; padding: 7px 10px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); font: inherit; }
+    input[type=search]:focus-visible, button:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+    button { padding: 7px 12px; border: 0; background: #2a2238; color: var(--ink); cursor: pointer; font: 600 12px "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+    button:hover { filter: brightness(1.2); }
+    button.danger { background: #3a1422; color: #ffb3c4; }
+    #count { color: var(--dim); font: 12px "JetBrains Mono", monospace; white-space: nowrap; }
+    main { flex: 1; overflow-y: auto; padding: 8px 14px 24px; }
+    .day { position: sticky; top: 0; margin: 14px 0 6px; padding: 4px 0; background: var(--bg); color: var(--dim); font: 600 11px "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .msg { display: grid; grid-template-columns: 56px 1fr; gap: 10px; padding: 6px 0; border-top: 1px solid #1f1a2b; }
+    .time { color: var(--dim); font: 12px "JetBrains Mono", monospace; padding-top: 2px; }
+    .who { font-weight: 700; margin-right: 6px; }
+    .you .who { color: var(--blue); }
+    .capri .who { color: var(--red); }
+    .text { white-space: pre-wrap; word-break: break-word; }
+    .brain { display: inline-block; margin-left: 6px; padding: 0 6px; font: 600 10px "JetBrains Mono", monospace; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); color: var(--dim); vertical-align: 2px; }
+    .brain.claude { color: #ffb38a; border-color: #5a3826; }
+    .brain.quick { color: var(--green); border-color: #1d4a2c; }
+    mark { background: #5a2440; color: #fff; }
+    .empty { margin: 60px auto; text-align: center; color: var(--dim); max-width: 340px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chat log</h1>
+    <input id="search" type="search" placeholder="Search what you or she said…" aria-label="Search the chat log">
+    <span id="count"></span>
+    <button id="clear" class="danger" title="Delete the whole log">Clear</button>
+  </header>
+  <main id="log" aria-live="polite"></main>
+  <script type="module" src="js/chatlog.js"></script>
+</body>
+</html>

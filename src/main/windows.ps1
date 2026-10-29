@@ -189,6 +189,83 @@ public static class CapriWindows {
     return best;
   }
 
+  // The watch itself, all in here (a PowerShell loop costs more than the looking does): a snapshot
+  // every 150 ms while things change, every 300 ms once nothing has for a few seconds. Stops with
+  // Capri, even if she crashed without telling us.
+  // The window she sits on (Capri says which on stdin, 0 = none): its edge is read ~64 times a
+  // second, so she rides a window you drag instead of hopping after it. One DWM call a look.
+  static long seat = 0;
+  static void Listen() {
+    var t = new System.Threading.Thread(() => {
+      try {
+        string line;
+        while ((line = Console.In.ReadLine()) != null) {
+          long id;
+          if (long.TryParse(line.Trim(), out id)) System.Threading.Interlocked.Exchange(ref seat, id);
+        }
+      } catch {}
+    });
+    t.IsBackground = true;
+    t.Start();
+  }
+
+  public static void Run(long self, int parent) {
+    Listen();
+    string last = "", seatLast = "";
+    int still = 0, tick = 0;
+    var output = Console.Out;
+    var clock = System.Diagnostics.Stopwatch.StartNew();
+    long next = 0;
+    while (true) {
+      long now = clock.ElapsedMilliseconds;
+      if (now >= next) {
+        string snap = Snapshot(self);
+        if (snap != last) {
+          output.WriteLine(snap);
+          output.Flush();
+          last = snap;
+          still = 0;
+        } else if (still < 1000) {
+          still++;
+        }
+        if (parent != 0 && ++tick % 20 == 0) {
+          try { System.Diagnostics.Process.GetProcessById(parent).Dispose(); } catch (ArgumentException) { return; }
+        }
+        next = now + (still > 20 ? 300 : 150);
+      }
+      long id = System.Threading.Interlocked.Read(ref seat);
+      if (id == 0) {
+        seatLast = "";
+        System.Threading.Thread.Sleep((int)Math.Max(1, next - clock.ElapsedMilliseconds));
+        continue;
+      }
+      RECT r;
+      if (DwmGetWindowAttribute(new IntPtr(id), DWMWA_EXTENDED_FRAME_BOUNDS, out r, 16) == 0) {
+        string s = "{\"seat\":" + id + ",\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"w\":" + (r.Right - r.Left) + ",\"h\":" + (r.Bottom - r.Top) + "}";
+        if (s != seatLast) {
+          if (seatLast != "") { output.WriteLine(s); output.Flush(); still = 0; moved = clock.ElapsedMilliseconds; } // the first look is the snapshot's
+          seatLast = s;
+        }
+      }
+      // being dragged: every 8 ms; sitting still: every 50 ms, just to notice it start
+      Wait(clock.ElapsedMilliseconds - moved < 600 ? 8 : 50);
+    }
+  }
+  static long moved = -10000;
+
+  // A precise wait without raising Windows' timer for everyone (Sleep only wakes every 15.6 ms here).
+  [DllImport("kernel32.dll")] static extern IntPtr CreateWaitableTimerExW(IntPtr attrs, IntPtr name, uint flags, uint access);
+  [DllImport("kernel32.dll")] static extern bool SetWaitableTimer(IntPtr timer, ref long due, int period, IntPtr fn, IntPtr arg, bool resume);
+  [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);
+  static IntPtr timer = IntPtr.Zero;
+  static bool timerTried = false;
+  static void Wait(int ms) {
+    if (!timerTried) { timerTried = true; timer = CreateWaitableTimerExW(IntPtr.Zero, IntPtr.Zero, 2, 0x1F0003); } // HIGH_RESOLUTION, all access
+    long due = -10000L * ms;
+    if (timer != IntPtr.Zero && SetWaitableTimer(timer, ref due, 0, IntPtr.Zero, IntPtr.Zero, false)) WaitForSingleObject(timer, 1000);
+    else System.Threading.Thread.Sleep(ms);
+  }
+
   public static string Snapshot(long self) {
     var sb = new StringBuilder();
     IntPtr fg = GetForegroundWindow();
@@ -232,17 +309,4 @@ public static class CapriWindows {
 "@
 
 [CapriWindows]::Init()
-$last = ''
-$tick = 0
-while ($true) {
-  $snap = [CapriWindows]::Snapshot($Self)
-  if ($snap -ne $last) {
-    [Console]::Out.WriteLine($snap)
-    [Console]::Out.Flush()
-    $last = $snap
-  }
-  # stop with Capri, even if she crashed without telling us
-  $tick++
-  if ($ParentPid -and ($tick % 20 -eq 0) -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { break }
-  Start-Sleep -Milliseconds 150
-}
+[CapriWindows]::Run($Self, $ParentPid)

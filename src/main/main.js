@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, screen, protocol, net, shell, globalShortcut, nativeImage,
-  clipboard, ClipboardItem, dialog, powerMonitor, desktopCapturer,
+  clipboard, ClipboardItem, dialog, powerMonitor, desktopCapturer, session,
 } = require('electron');
 const { randomUUID } = require('node:crypto');
 
@@ -18,8 +18,13 @@ const llm = require('./llm');
 const ollama = require('./ollama');
 const setup = require('./setup');
 const apps = require('./apps');
+const { control } = require('./control');
+const { route } = require('./route');
 const launch = require('./launch');
 const files = require('./files');
+const speech = require('./speech');
+const chatlog = require('./chatlog');
+const spotify = require('./spotify');
 const { ASSISTANTS, assistant } = require('./assistants');
 const activeAssistant = () => assistant(config.load().assistant); // Claude Code or Codex
 const activeHooks = () => activeAssistant().hooks;
@@ -286,6 +291,10 @@ function rendererConfig() {
 
 function updateConfig(patch) {
   config.save(patch);
+  if ('listen' in patch) {
+    if (patch.listen && speech.state(config.load()).ears) speech.warm(); // her Whisper loaded, ready
+    else if (!patch.listen) speech.stopEars();
+  }
   if ('rest' in patch) {
     fitOverlay(); // the taskbar in her window or not
     windowWatch?.refresh();
@@ -294,6 +303,158 @@ function updateConfig(patch) {
   overlay?.webContents.send('capri:config', cfg);
   rebuildTray();
   return cfg;
+}
+
+// Her voice and "Hey Capri" (speech.js), switched on from her menu: what's missing for them is
+// downloaded first (her panel shows how far along), and only then is the setting turned on.
+let voiceBusy = false;
+
+// A window minimized by its handle (her "short circuit" quickhack, app.js): a whole number from the
+// window watcher, never hers. Resolves true once Windows took it.
+function minimizeWindow(id) {
+  const self = overlay.getNativeWindowHandle();
+  const own = self.length >= 8 ? self.readBigUInt64LE(0) : BigInt(self.readUInt32LE(0));
+  if (process.platform !== 'win32' || !Number.isSafeInteger(id) || id <= 0 || BigInt(id) === own) return Promise.resolve(false);
+  const script = 'Add-Type -Namespace Capri -Name Win -MemberDefinition \'[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr h, int c);\'; '
+    + `[Capri.Win]::ShowWindowAsync([System.IntPtr]${id}, 6)`;
+  return new Promise((resolve) => {
+    require('node:child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 10000 }, (err, out) => {
+      resolve(!err && /true/i.test(String(out)));
+    });
+  });
+}
+
+// Her quick brain: a small local model (Ollama) that answers what's simple at once, next to Claude
+// Code for what takes work (chat.js picks per message). quickReady: Ollama's up with that model.
+let quickReady = false;
+let quickBusy = false;
+const QUICK_GB = 2.2;
+const QUICK_IDLE = '1m'; // Ollama unloads it this long after your last message to it
+async function quickState(cfg = config.load()) {
+  const models = await ollama.models().catch(() => null);
+  quickReady = Boolean(models?.includes(cfg.quickModel));
+  return { ok: quickReady, model: cfg.quickModel, running: models !== null };
+}
+
+// Sets it up from her menu: Ollama installed (winget) and started if it isn't, the model fetched.
+async function setUpQuickBrain() {
+  if (quickBusy) return;
+  quickBusy = true;
+  rebuildTray();
+  const say = (line, done = false) => sendCommand('brainProgress', { line, done });
+  const cfg = config.load();
+  try {
+    const st = await setup.ollamaState();
+    if (!st.installed) {
+      if (!st.winget) throw new Error('no winget here: install Ollama from ollama.com, then try again');
+      say('Installing Ollama…');
+      const res = await setup.installOllama();
+      if (!res.ok) throw new Error(`Ollama didn't install (${res.error || res.code})`);
+    }
+    if (!st.running) {
+      say('Starting Ollama…');
+      const res = await setup.startOllama();
+      if (!res.ok) throw new Error(res.error || "Ollama didn't start");
+    }
+    let last = -10;
+    await setup.pullModel(cfg.quickModel, ({ completed = 0, total = 0 }) => {
+      const percent = total ? Math.floor((completed / total) * 100) : 0;
+      if (percent >= last + 10) say(`Downloading my quick brain… ${(last = percent)}%`);
+    });
+    await quickState(cfg);
+    updateConfig({ quick: true });
+    say('Quick brain online. Simple stuff is mine now, the heavy lifting goes to Claude.', true);
+  } catch (err) {
+    say(`Couldn't set up my quick brain: ${err.message}`, true);
+  } finally {
+    quickBusy = false;
+    rebuildTray();
+  }
+}
+
+// Right-click in one of her windows: cut, copy, paste, select all (Electron gives a window none)
+function editMenu(win) {
+  win.webContents.on('context-menu', (_e, p) => {
+    const items = [
+      ...(p.isEditable ? [{ role: 'cut', enabled: p.editFlags.canCut }] : []),
+      { role: 'copy', enabled: p.editFlags.canCopy },
+      ...(p.isEditable ? [{ role: 'paste', enabled: p.editFlags.canPaste }] : []),
+      { type: 'separator' },
+      { role: 'selectAll' },
+    ];
+    Menu.buildFromTemplate(items).popup({ window: win });
+  });
+}
+
+// Her Spotify (spotify.js): connecting it, in a window of its own
+let spotifyWin = null;
+function spotifyWindow() {
+  if (spotifyWin) return spotifyWin.focus();
+  spotifyWin = new BrowserWindow({
+    width: 560, height: 560, resizable: true, autoHideMenuBar: true, title: 'Capri — Spotify',
+    backgroundColor: '#14101c', icon: path.join(ROOT, 'assets', 'icons', 'capri-app.png'), show: false,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  editMenu(spotifyWin);
+  spotifyWin.loadURL('capri://app/src/renderer/spotify.html');
+  spotifyWin.once('ready-to-show', () => spotifyWin?.show());
+  spotifyWin.on('closed', () => { spotifyWin = null; });
+}
+
+// Her chat log (chatlog.js), in a window of its own
+let chatLogWin = null;
+function chatLogWindow() {
+  if (chatLogWin) return chatLogWin.focus();
+  chatLogWin = new BrowserWindow({
+    width: 640, height: 720, minWidth: 420, minHeight: 300, autoHideMenuBar: true, title: 'Capri — chat log',
+    backgroundColor: '#14101c', icon: path.join(ROOT, 'assets', 'icons', 'capri-app.png'), show: false,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  editMenu(chatLogWin);
+  chatLogWin.loadURL('capri://app/src/renderer/chatlog.html');
+  chatLogWin.once('ready-to-show', () => chatLogWin?.show());
+  chatLogWin.on('closed', () => { chatLogWin = null; });
+}
+
+// Her voice's volume, a slider in a little window of its own (a menu can't hold one)
+let volumeWin = null;
+function volumeWindow() {
+  if (volumeWin) return volumeWin.focus();
+  volumeWin = new BrowserWindow({
+    width: 360, height: 168, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    alwaysOnTop: true, autoHideMenuBar: true, title: 'Capri — voice volume', backgroundColor: '#14101c',
+    icon: path.join(ROOT, 'assets', 'icons', 'capri-app.png'), show: false,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  editMenu(volumeWin);
+  volumeWin.loadURL('capri://app/src/renderer/volume.html');
+  volumeWin.once('ready-to-show', () => volumeWin?.show());
+  volumeWin.on('closed', () => { volumeWin = null; });
+}
+async function voiceOn(patch) {
+  const cfg = { ...config.load(), ...patch };
+  const have = speech.state(cfg);
+  if (!have.mouth || !have.ears) {
+    if (voiceBusy) return rebuildTray();
+    voiceBusy = true;
+    rebuildTray();
+    const progress = (payload) => overlay?.webContents.send('voice:progress', payload);
+    try {
+      let last = -1;
+      await speech.install(cfg, ({ done, total }) => {
+        const percent = Math.min(99, Math.floor((done / Math.max(1, total)) * 100));
+        if (percent !== last) progress({ percent: (last = percent) });
+      });
+      progress({ percent: 100, done: true });
+    } catch (err) {
+      progress({ error: err.message });
+      return;
+    } finally {
+      voiceBusy = false;
+      rebuildTray();
+    }
+  }
+  updateConfig(patch);
 }
 
 function rebuildTray() {
@@ -306,6 +467,7 @@ function rebuildTray() {
 
   const screens = displays();
   const current = targetDisplay().id;
+  const voiceState = speech.state(cfg);
   // how close she is to you (bond.js): STAGES there, 1000 xp is 100 %
   const xp = cfg.bond?.xp || 0;
   const stage = [0, 100, 300, 550, 850].filter((at) => xp >= at).length - 1;
@@ -327,7 +489,9 @@ function rebuildTray() {
     { label: t.demo, click: playDemo },
     { label: t.help, click: () => sendCommand('welcome') },
     ...(cfg.claude ? [{ label: t.report, click: () => sendCommand('report') }] : []),
-    { label: t.talk, click: () => sendCommand('chat') },
+    { label: t.talk, accelerator: 'Ctrl+Alt+T', click: () => sendCommand('chat') },
+    { label: t.chatLog, click: chatLogWindow },
+    { label: spotify.linked() ? t.spotifyOn : t.spotifyOff, click: spotifyWindow },
     { label: t.lookNow, click: () => sendCommand('look') },
     {
       label: t.reminders,
@@ -359,6 +523,42 @@ function rebuildTray() {
             shell.openPath(userSoundsDir());
           },
         },
+      ],
+    },
+    {
+      label: t.voice,
+      submenu: [
+        { label: t.speakOn, type: 'checkbox', checked: Boolean(cfg.speak), click: (item) => (item.checked ? voiceOn({ speak: true }) : updateConfig({ speak: false })) },
+        { label: t.listenOn, type: 'checkbox', checked: Boolean(cfg.listen), click: (item) => (item.checked ? voiceOn({ listen: true }) : updateConfig({ listen: false })) },
+        { label: t.voiceVolume(Math.round((cfg.voiceVolume ?? 1) * 100)), click: volumeWindow },
+        {
+          label: t.callWith,
+          submenu: [['name', t.callName], ['key', t.callKey]].map(([callWith, label]) => ({
+            label, type: 'radio', checked: (cfg.callWith || 'name') === callWith, click: () => updateConfig({ callWith }),
+          })),
+        },
+        {
+          label: t.hearing,
+          submenu: [['fast', t.hearingFast], ['accurate', t.hearingAccurate]].map(([hearing, label]) => ({
+            label, type: 'radio', checked: (cfg.hearing || 'fast') === hearing, click: () => updateConfig({ hearing }),
+          })),
+        },
+        {
+          label: t.glitch,
+          submenu: [['subtle', t.glitchSubtle], ['anime', t.glitchAnime], ['heavy', t.glitchHeavy]].map(([glitch, label]) => ({
+            label, type: 'radio', checked: (cfg.glitch || 'anime') === glitch, click: () => updateConfig({ glitch }),
+          })),
+        },
+        {
+          label: t.voicePick,
+          submenu: Object.entries(speech.VOICES).map(([id, v]) => ({
+            label: v.label, type: 'radio', checked: (cfg.ttsVoice || 'kristin') === id, click: () => voiceOn({ ttsVoice: id }),
+          })),
+        },
+        { type: 'separator' },
+        voiceBusy ? { label: t.voiceBusy, enabled: false }
+          : voiceState.mouth && voiceState.ears ? { label: t.voiceNote, enabled: false }
+            : { label: t.voiceSetup(voiceState.missingMB), click: () => voiceOn({}) },
       ],
     },
     {
@@ -399,6 +599,9 @@ function rebuildTray() {
         ] : []),
         { type: 'separator' },
         ...(cfg.provider === 'claude' ? [
+          quickBusy ? { label: t.quickBusy, enabled: false }
+            : quickReady ? { label: t.quick(cfg.quickModel), type: 'checkbox', checked: cfg.quick !== false, click: (item) => updateConfig({ quick: item.checked }) }
+              : { label: t.quickSetup(QUICK_GB), click: setUpQuickBrain },
           { label: `Claude Code: ${cfg.claudeCwd || app.getPath('home')}`, click: pickClaudeFolder },
           {
             label: 'Claude Code permissions',
@@ -412,6 +615,8 @@ function rebuildTray() {
         { label: t.apiKey, click: () => sendCommand('setupKey') },
       ],
     },
+    { label: t.gaming, type: 'checkbox', checked: Boolean(cfg.gaming), click: (item) => updateConfig({ gaming: item.checked }) },
+    { label: t.audience, type: 'checkbox', checked: Boolean(cfg.audience), enabled: Boolean(cfg.listen), click: (item) => updateConfig({ audience: item.checked }) },
     { label: t.wander, type: 'checkbox', checked: cfg.wander, click: (item) => updateConfig({ wander: item.checked }) },
     { label: t.possess, type: 'checkbox', checked: cfg.possess, click: (item) => updateConfig({ possess: item.checked }) },
     { label: t.jealous, type: 'checkbox', checked: cfg.jealous !== false, click: (item) => updateConfig({ jealous: item.checked }) },
@@ -623,13 +828,20 @@ async function sayAboutSnap({ id, persona, prompt, history = [] }) {
   if (!chatModels?.length) await refreshModels();
   const model = pickModel(cfg);
   if (!model) return { ok: false, code: 'noai' };
-  if (cfg.provider === 'claude') return { ok: false, code: 'novision', model: 'Claude Code' };
+  // asked in her chat: the conversation so far comes before it (text only)
+  const before = (Array.isArray(history) ? history : []).filter((m) => typeof m?.content === 'string' && ['user', 'assistant'].includes(m.role));
+  // Claude Code looks through a session of its own (llm.js)
+  if (cfg.provider === 'claude') {
+    try {
+      return { ok: true, text: await llm.claudeLook({ persona, prompt, image, history: before }, AbortSignal.timeout(120000)), model };
+    } catch (err) {
+      return { ok: false, error: err.message, model };
+    }
+  }
   if (cfg.provider === 'ollama' && !(await ollama.canSee(model))) return { ok: false, code: 'novision', model };
   const user = cfg.provider === 'ollama'
     ? { role: 'user', content: prompt, images: [image] }
     : { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } }] };
-  // asked in her chat: the conversation so far comes before it (text only)
-  const before = (Array.isArray(history) ? history : []).filter((m) => typeof m?.content === 'string' && ['user', 'assistant'].includes(m.role));
   const messages = [{ role: 'system', content: persona }, ...before, user];
   for (let attempt = 0; ; attempt++) {
     try {
@@ -690,7 +902,7 @@ function registerIpc() {
     return {
       current: targetDisplay().id,
       origin: { x: o.x, y: o.y },
-      list: displays().map(({ id, bounds: b }) => ({ id, x: b.x, y: b.y, w: b.width, h: b.height })),
+      list: displays().map(({ id, bounds: b }) => ({ id, x: b.x, y: b.y, w: b.width, h: b.height, primary: id === screen.getPrimaryDisplay().id })),
     };
   });
   ipcMain.handle('screens:move', async (_e, id) => {
@@ -706,12 +918,17 @@ function registerIpc() {
   ipcMain.handle('config:set', (_e, patch) => updateConfig(patch));
   ipcMain.handle('demo:window', (_e, open) => demoWindow(open));
   // right-clicking her: the same menu as the tray icon (which Windows often hides behind the ^ by the clock)
-  ipcMain.on('menu:open', () => trayMenu?.popup({ window: overlay }));
+  // (her window has to be in front while it's open: her window watcher leaves it be till it closes)
+  ipcMain.on('menu:open', () => {
+    if (!trayMenu) return;
+    trayMenu.popup({ window: overlay });
+  });
   // her welcome panel's buttons
   ipcMain.handle('hooks:install', () => runHooks('install', { quiet: true }));
   ipcMain.handle('claude:found', () => fs.existsSync(path.dirname(activeHooks().status().file))); // Claude Code keeps its settings there
   ipcMain.on('claude:help', () => shell.openExternal(activeAssistant().help));
   ipcMain.handle('windows:get', () => lastWindows);
+  ipcMain.on('windows:seat', (_e, id) => windowWatch?.seat(id)); // the window she sits on, watched closely
   // talking to her (chat.js): is Ollama there, with a model to talk with
   ipcMain.handle('chat:status', async () => {
     const cfg = config.load(true); // keys may have been edited by hand
@@ -722,10 +939,13 @@ function registerIpc() {
     const model = pickModel();
     llm.warm(provider, model); // loading while you type your first message
     const local = llm.isLocal(provider, cfg, model);
-    return { ok: true, provider, model, agent: provider === 'claude', local, warmup: provider === 'ollama' && local };
+    // with Claude Code: the quick brain, when it's there and on (loaded meanwhile, like her model)
+    // (not loaded yet: that waits for your first message to it, chat:send)
+    const quick = provider === 'claude' && cfg.quick !== false ? await quickState(cfg) : null;
+    return { ok: true, provider, model, agent: provider === 'claude', local, warmup: provider === 'ollama' && local, quick: quick?.ok ? quick.model : null, spotify: spotify.linked() };
   });
   // her answer, streamed to the overlay piece by piece as `chat:delta`
-  ipcMain.handle('chat:send', async (_e, { id, messages }) => {
+  ipcMain.handle('chat:send', async (_e, { id, messages, brain }) => {
     const abort = new AbortController();
     chats.set(id, abort);
     try {
@@ -735,6 +955,13 @@ function registerIpc() {
         overlay?.webContents.send('chat:delta', { id, text });
       };
       const cfg = config.load();
+      // the quick brain: straight to Ollama, its one model (chat.js asks Claude instead if this fails).
+      // Nothing of it runs until you talk to it: Ollama started now if it isn't, the model loaded with
+      // this message, and let go of a minute after the last one (QUICK_IDLE)
+      if (brain === 'quick') {
+        if (!(await ollama.models().then(() => true, () => false))) await setup.startOllama();
+        return { ok: true, text: await llm.chat('ollama', llmConfig(cfg), { model: cfg.quickModel, messages, keepAlive: QUICK_IDLE }, send, abort.signal), brain };
+      }
       const text = await chatWithFallback(cfg, messages, send, abort.signal, () => streamed);
       if (cfg.provider === 'claude') saveMemory({ claude: llm.claudeMemory() });
       return { ok: true, text };
@@ -745,6 +972,14 @@ function registerIpc() {
     }
   });
   ipcMain.on('chat:stop', (_e, id) => chats.get(id)?.abort());
+  // who takes a message her command words didn't catch (route.js): her quick brain picks, Claude when unsure
+  ipcMain.handle('chat:route', async (_e, text) => {
+    const cfg = config.load();
+    if (!(await ollama.models().then(() => true, () => false))) await setup.startOllama().catch(() => {});
+    const res = await route(cfg.quickModel, String(text || ''), { keepAlive: QUICK_IDLE });
+    console.log(`[capri] route ${res.route}${res.do.length ? ` ${JSON.stringify(res.do)}` : ''} in ${res.ms} ms${res.error ? ` (${res.error})` : ''}`);
+    return res;
+  });
   // she looks at your screen (look.js): the picture first, then what her AI says about it
   ipcMain.handle('look:snap', async () => {
     try {
@@ -757,6 +992,32 @@ function registerIpc() {
     }
   });
   ipcMain.handle('look:say', (_e, request) => sayAboutSnap(request || {}));
+  // her line out loud, as a WAV (null: her voice is off or not set up)
+  ipcMain.handle('voice:say', async (_e, text) => {
+    const cfg = config.load();
+    if (!cfg.speak || typeof text !== 'string' || !text.trim() || !speech.state(cfg).mouth) return null;
+    try {
+      return await speech.speak(cfg, text.slice(0, 1200));
+    } catch (err) {
+      console.error('[capri] her voice:', err.message);
+      return null;
+    }
+  });
+  // she heard her name: her voice loaded while she thinks of an answer (Kokoro takes ~2 s to load)
+  ipcMain.on('voice:warm', () => {
+    const cfg = config.load();
+    if (cfg.speak && speech.state(cfg).mouth) speech.warmVoice(cfg);
+  });
+  ipcMain.on('voice:test', () => sendCommand('voiceTest')); // the volume window's test button
+  ipcMain.handle('windows:minimize', (_e, id) => minimizeWindow(Number(id))); // her short circuit
+  // a picture of her screen for a quickhack to bend (hacks.js): handed over, never written anywhere
+  ipcMain.handle('fx:screen', async () => `data:image/jpeg;base64,${await snapScreen()}`);
+  // what you said, from a few seconds of 16 kHz WAV ('' when listening is off)
+  ipcMain.handle('voice:hear', (_e, wav, sharp) => {
+    const cfg = config.load();
+    if (!cfg.listen || !(wav instanceof Uint8Array) || wav.length > 1_000_000 || !speech.state(cfg).ears) return '';
+    return speech.hear(Buffer.from(wav), Boolean(sharp), cfg.hearing === 'accurate');
+  });
   // how hard the processor works, in %, since the last time she asked (pc.js)
   let cpuBefore = null;
   ipcMain.handle('pc:cpu', () => {
@@ -771,6 +1032,16 @@ function registerIpc() {
     });
     return total > 0 ? Math.round(100 * (1 - idle / total)) : null;
   });
+  // what's left of the memory and of the system drive (pc.js): { ram: % free, ramGb, diskGb }
+  ipcMain.handle('pc:room', async () => {
+    const ram = os.freemem() / os.totalmem();
+    let diskGb = null;
+    try {
+      const s = await fs.promises.statfs(`${process.env.SystemDrive || 'C:'}\\`);
+      diskGb = (s.bavail * s.bsize) / 1e9;
+    } catch {}
+    return { ram: Math.round(ram * 100), ramGb: os.freemem() / 1e9, diskGb };
+  });
   // where her AI runs, for what she tells you before she looks: { local, provider, model }
   ipcMain.handle('look:where', () => {
     const cfg = config.load();
@@ -779,6 +1050,18 @@ function registerIpc() {
     return { local: llm.isLocal(cfg.provider, cfg, model), provider, model };
   });
   ipcMain.handle('chat:memory', () => readMemory().history || []);
+  ipcMain.on('chatlog:add', (_e, entry) => chatlog.add(entry)); // all of it, for her chat log window
+  ipcMain.handle('chatlog:get', () => chatlog.list());
+  ipcMain.handle('chatlog:clear', () => chatlog.clear());
+  // Spotify (spotify.js): her window's buttons, and what you ask her to play
+  ipcMain.handle('spotify:status', () => ({ linked: spotify.linked(), redirect: spotify.REDIRECT }));
+  ipcMain.handle('spotify:connect', async (_e, id) => { const res = await spotify.connect(id); rebuildTray(); return res; });
+  ipcMain.handle('spotify:disconnect', () => { spotify.disconnect(); rebuildTray(); });
+  ipcMain.on('spotify:dashboard', () => shell.openExternal('https://developer.spotify.com/dashboard'));
+  ipcMain.handle('spotify:pasteText', () => clipboard.readText().trim().slice(0, 200)); // her window's Paste button
+  ipcMain.handle('spotify:copyRedirect', () => clipboard.writeText(spotify.REDIRECT)); // and its Copy button
+  ipcMain.handle('spotify:play', (_e, text) => spotify.play(String(text || '').slice(0, 300)));
+  ipcMain.handle('spotify:control', (_e, ask) => spotify.control(ask || {})); // shuffle, repeat, its volume
   ipcMain.on('chat:remember', (_e, history) => Array.isArray(history) && saveMemory({ history }));
   ipcMain.on('chat:ollama', () => shell.openExternal(OLLAMA_SITE));
   // setting her up with buttons (setup.js): Ollama and a model, or a key, or an address
@@ -833,6 +1116,18 @@ function registerIpc() {
   ipcMain.handle('apps:list', async () => (await apps.list().catch(() => [])).map(appInfo));
   ipcMain.handle('apps:find', async (_e, wanted) => appInfo(await apps.find(wanted).catch(() => null)));
   ipcMain.handle('apps:close', (_e, { name, force }) => apps.close(name, { force }).catch((err) => ({ error: err.message })));
+  // her hands on your PC (control.js): "this" is the window you're in
+  ipcMain.handle('pc:control', async (_e, ask = {}) => {
+    let { target } = ask;
+    // "this": the window you're in; "game": the same, the one you're playing (her own never counts)
+    if (target === 'this' || target === 'game') {
+      const id = windowWatch?.yours();
+      if (!id) return { error: 'nothing' };
+      target = `#${id}`;
+    }
+    // `target` back too: "this" as the window it was, for answering its popup after
+    return control({ ...ask, target }).then((res) => ({ ...res, target }), (err) => ({ error: err.message }));
+  });
   // opening things you ask her to (launch.js): an app or a game, your music, a website
   ipcMain.handle('apps:findLaunch', async (_e, text) => {
     const item = await launch.find(String(text || '')).catch(() => null);
@@ -1023,15 +1318,52 @@ function main() {
     app.quit();
     return;
   }
-  app.on('second-instance', () => sendCommand('status'));
+  app.on('second-instance', () => sendCommand('status')); // her shortcut clicked while she's up: she says so
+
+  // Below-normal priority for every process of hers, checked again now and then (her windows come and
+  // go): whenever a game and she both want the processor, the game gets it first
+  const yieldToGames = () => {
+    for (const { pid } of app.getAppMetrics()) {
+      try { os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* gone already */ }
+    }
+  };
+  app.whenReady().then(() => { yieldToGames(); setInterval(yieldToGames, 30000); });
   if (process.platform === 'win32') app.setAppUserModelId('capri.desktop');
 
   app.whenReady().then(() => {
     if (!['codex', 'claude'].includes(config.load().assistant)) config.save({ assistant: activeAssistant().id });
     serveProtocol();
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+      if (permission !== 'media') return callback(true);
+      callback(Boolean(config.load().listen) && !(details.mediaTypes || []).includes('video'));
+    });
+    session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => (
+      permission !== 'media' || (Boolean(config.load().listen) && details?.mediaType !== 'video')));
+    // audience mode (speech.js hearPc): the PC's own sound, Windows' loopback, for her overlay only and
+    // only while it's on; the screen that has to come with it is dropped by her straight away
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+      const cfg = config.load();
+      const her = overlay?.webContents.mainFrame;
+      const fromHer = Boolean(her && request.frame && request.frame.processId === her.processId && request.frame.routingId === her.routingId);
+      if (!cfg.audience || !cfg.listen || !fromHer) return callback({});
+      desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+        .then(([screen]) => callback(screen ? { video: screen, audio: 'loopback' } : {}), () => callback({}));
+    });
     registerIpc();
+    if (config.load().gaming) config.save({ gaming: false }); // gaming mode never outlives her: off at every start
+    if (config.load().audience) config.save({ audience: false }); // and audience mode: nobody else hears her by default
+    // her Kokoro voice ("her own", the other Capri's free voice), picked once when it's here (Voice >
+    // Voice still lists the Piper ones)
+    if (!config.load().kokoroSet && speech.state({ ...config.load(), ttsVoice: 'kokoro_capri' }).mouth) config.save({ ttsVoice: 'kokoro_capri', kokoroSet: true });
+    // she starts with Windows, set once (her menu's "Start with Windows" takes it back, for good)
+    if (!config.load().loginSet && process.platform === 'win32') {
+      app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: true });
+      config.save({ loginSet: true });
+    }
+    quickState().then(() => rebuildTray()); // her menu knows whether her quick brain's there
     createOverlay();
     createTray();
+    if (config.load().listen && speech.state(config.load()).ears) speech.warm(); // her ears ready before you call her
     windowWatch = startWindowWatch({
       overlay,
       onUpdate: (data) => {
@@ -1040,6 +1372,7 @@ function main() {
         lastWindows = data;
         overlay?.webContents.send('windows:update', data);
       },
+      onSeat: (win) => overlay?.webContents.send('windows:seat', win),
     });
     createBridge({
       port: PORT,
@@ -1048,6 +1381,8 @@ function main() {
       onDebug: DEV ? debugHandler : null,
     });
     globalShortcut.register('Control+Alt+C', () => toggleVisible());
+    globalShortcut.register('Control+Alt+V', () => config.load().listen && sendCommand('listenNow')); // her key: listen now
+    globalShortcut.register('Control+Alt+T', () => sendCommand('chat')); // type to her, from anywhere
     llm.restoreClaude(readMemory().claude);
     refreshModels(); // for her menu's model list
     setTimeout(() => launch.launchables().catch(() => {}), 20000); // what she can open, before you ask
@@ -1069,6 +1404,7 @@ function main() {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     windowWatch?.stop();
+    speech.stopEars(); // her Whisper servers go with her
   });
   app.on('window-all-closed', (e) => e.preventDefault());
 }

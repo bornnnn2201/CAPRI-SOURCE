@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Capri's face, redrawn as flat shapes for a crisp icon at every size (after assets/icons/capri.png) -->
+  <defs>
+    <clipPath id="tile"><rect width="256" height="256" rx="44"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- the red behind her, with its dark streaks -->
+    <rect width="256" height="256" fill="#ff2152"/>
+    <path d="M0 0 H92 L40 120 L0 150 Z" fill="#1a0b1e"/>
+    <path d="M178 0 H256 V70 Z" fill="#c4103a"/>
+    <!-- her head: the dark shape, horns up -->
+    <path d="M18 256 L22 60 L66 4 L104 70 L150 52 L196 8 L238 34 L250 256 Z" fill="#0b0912"/>
+    <!-- the green of her mask -->
+    <path d="M14 120 L60 70 L104 86 L150 60 L206 42 L236 74 L230 150 L196 172 L150 160 L110 184 L60 196 L18 186 Z" fill="#2ef07a"/>
+    <!-- its black cuts -->
+    <path d="M96 92 L132 66 L124 132 L102 146 Z" fill="#0b0912"/>
+    <path d="M20 150 L44 132 L40 176 L22 184 Z" fill="#0b0912"/>
+    <!-- her eyes: black rings, green, blue, white -->
+    <g>
+      <circle cx="190" cy="100" r="42" fill="#0b0912"/>
+      <circle cx="190" cy="100" r="33" fill="#2ef07a"/>
+      <circle cx="190" cy="100" r="26" fill="#0b0912"/>
+      <circle cx="190" cy="100" r="20" fill="#2b6dff"/>
+      <circle cx="193" cy="97" r="8" fill="#ffffff"/>
+    </g>
+    <g>
+      <circle cx="66" cy="140" r="34" fill="#0b0912"/>
+      <circle cx="66" cy="140" r="27" fill="#2ef07a"/>
+      <circle cx="66" cy="140" r="21" fill="#0b0912"/>
+      <circle cx="66" cy="140" r="16" fill="#2b6dff"/>
+      <circle cx="68" cy="138" r="6.5" fill="#ffffff"/>
+    </g>
+    <!-- the grin: black jaw, white zigzag teeth -->
+    <path d="M36 204 L120 172 L216 154 L236 172 L214 220 L120 246 L40 246 Z" fill="#0b0912"/>
+    <path d="M50 214 L84 188 L96 206 L124 180 L136 199 L166 172 L178 191 L216 162 L202 198 L178 214 L164 200 L136 228 L122 212 L96 238 L84 220 L54 234 Z" fill="#ffffff"/>
+    <!-- a violet edge, low on the left -->
+    <path d="M0 214 L28 226 L22 256 H0 Z" fill="#8a4dff"/>
+  </g>
+</svg>

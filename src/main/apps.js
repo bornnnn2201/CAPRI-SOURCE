@@ -43,6 +43,17 @@ async function list() {
 
 const simple = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
+// letters to change, add or drop to get from a to b
+function distance(a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
 // The open app that `wanted` names, by its name or its description ("am music", "YouTube Music").
 async function find(wanted) {
   const key = simple(wanted);
@@ -53,6 +64,8 @@ async function find(wanted) {
     if (names.includes(key)) return 3;
     if (names.some((n) => n.startsWith(key) || key.startsWith(n))) return 2;
     if (key.length >= 3 && names.some((n) => n.includes(key) || key.includes(n))) return 1;
+    // misheard ("crome", "discorde"): a letter or two off
+    if (key.length >= 4 && names.some((n) => Math.abs(n.length - key.length) <= 2 && distance(n, key) <= (key.length >= 7 ? 2 : 1))) return 0.5;
     return 0;
   };
   const best = apps.map((app) => [score(app), app]).filter(([s]) => s > 0).sort((a, b) => b[0] - a[0])[0];
@@ -61,17 +74,14 @@ async function find(wanted) {
 
 // Closes it like its close button would; `force` ends it outright (unsaved work is lost).
 // Resolves with what's left: { running } (true when it stayed open, or hid in the tray).
+// Every window of it, not only its main one (Chrome, with three windows open, kept two).
 async function close(name, { force = false } = {}) {
-  const app = (await list()).find((a) => a.process === name);
-  if (!app) return { running: false };
-  const ids = app.ids.join(',');
-  const out = await powershell(force
-    ? `Stop-Process -Id ${ids} -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600; `
-      + `@(Get-Process -Id ${ids} -ErrorAction SilentlyContinue).Count`
-    : `foreach ($p in @(Get-Process -Id ${ids} -ErrorAction SilentlyContinue)) { [void]$p.CloseMainWindow() }; `
-      + 'Start-Sleep -Milliseconds 2500; '
-      + `@(Get-Process -Name '${name.replace(/'/g, "''")}' -ErrorAction SilentlyContinue).Count`);
-  return { running: Number(out) > 0 };
+  if (KEEP.has(String(name).toLowerCase())) return { running: true };
+  const res = await require('./control').control({ op: force ? 'force' : 'close', target: name });
+  if (res.error) throw new Error(res.error);
+  // still open: a window of it is (asking you to save?), or it was only ever in the tray; closed, even
+  // if it goes on in the background without a window (Chrome, Steam)
+  return { running: force ? res.running : res.windows > 0 || (res.found === 0 && res.running), dialog: res.dialog || null };
 }
 
 module.exports = { list, find, close, powershell };

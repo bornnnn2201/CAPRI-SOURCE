@@ -866,3 +866,70 @@ html[data-motion='reduced'] .panel__line.is-glitching,
 html[data-motion='reduced'] .panel[data-kind='alert'] .panel__state {
   animation: none !important;
 }
+
+/* Her ears (ears.js): LISTENING by her head while she waits for you to speak */
+.ears {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  --ears: var(--green);
+  filter: drop-shadow(3px 3px 0 var(--violet));
+  will-change: transform;
+}
+.ears[data-state='talk'] { --ears: var(--red); }
+.ears[data-state='think'] { --ears: var(--paper-2); }
+.ears__plate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px 5px 9px;
+  background: var(--ink);
+  color: var(--ears);
+  font-family: var(--font-mono);
+  font-size: var(--text-data);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.ears__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ears);
+  box-shadow: 0 0 8px var(--ears);
+  animation: ears-pulse 900ms ease-in-out infinite;
+}
+.ears__bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.ears__bars i {
+  display: block;
+  width: 3px;
+  height: 14px;
+  background: var(--ears);
+  transform: scaleY(0.12);
+  transform-origin: center;
+}
+.ears__time {
+  height: 2px;
+  margin: 2px 7px 0 0;
+  background: color-mix(in oklch, var(--ears) 25%, transparent);
+}
+.ears__time b {
+  display: block;
+  height: 100%;
+  background: var(--ears);
+  transform-origin: left;
+}
+@keyframes ears-pulse {
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ears__dot { animation: none; }
+}

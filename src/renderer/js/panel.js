@@ -21,6 +21,10 @@ const KIND_FACE = { alert: 'many', done: 'look', error: 'laugh', work: 'calm', i
 const PRIORITY = { info: 1, idle: 1, work: 2, done: 3, error: 3, report: 3, chat: 3, alert: 4, remind: 4 };
 const DECODE_STEP_MS = 28;
 const COUNT_MS = 700; // her report's numbers counting up
+// What she tells you goes away on its own after this, never waiting for a click (autoClose), but for
+// what's waiting on you: a permission prompt, a step of her guide or setup, a download going on.
+const AUTO_CLOSE_MS = 10000;
+const stays = (msg) => msg.kind === 'alert' || msg.kind === 'work' || msg.guide || msg.chat || typeof msg.progress === 'number';
 
 export class Panel {
   constructor({ panel, ticker, labels }) {
@@ -52,6 +56,7 @@ export class Panel {
     this.view = { w: innerWidth, h: innerHeight };
     this.onChar = null;    // (mood) => void, for the voice blips
     this.onTalk = null;    // (talking: boolean) => void
+    this.onWantKeys = null; // () => void: you went to type in her chat (chat.js gives her window the keyboard)
     this.suspended = false;
     this.tickerAction = null;
     this.tickerShownAt = 0;
@@ -75,9 +80,17 @@ export class Panel {
     this.chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.hide();
     });
+    this.chatInput.addEventListener('input', () => { this.lastKey = performance.now(); });
+    this.chatInput.addEventListener('pointerdown', () => this.onWantKeys?.());
     this.chatClose.addEventListener('click', () => this.hide());
+    // reading it, the pointer on it: it waits (autoClose)
+    this.hovered = false;
+    this.lastKey = 0;
+    this.el.addEventListener('pointerenter', () => { this.hovered = true; });
+    this.el.addEventListener('pointerleave', () => { this.hovered = false; });
 
     this.el.addEventListener('click', () => {
+      if (this.current?.chat) this.onWantKeys?.(); // her window takes the keyboard only now
       if (this.current?.chat) this.chatInput.focus(); // a chat stays until you close it
       else this.hide();
     });
@@ -148,14 +161,28 @@ export class Panel {
 
     this.tickerEl.hidden = true;
     this.leaving = false;
+    this.asking = false;
     this.el.hidden = false;
     this.el.classList.remove('is-leaving');
     this.replayEnter();
     this.place();
     this.decode(msg.line || '', msg.kind);
 
-    if (msg.hold) this.hideTimer = setTimeout(() => this.hide(), msg.hold);
+    if (msg.hold) this.autoClose(Math.min(msg.hold, AUTO_CLOSE_MS));
+    else if (!stays(msg)) this.autoClose();
     return true;
+  }
+
+  // Gone in `ms` on its own, unless your pointer is on it or you're typing to her (or she's still
+  // answering you): then it looks again a moment later.
+  autoClose(ms = AUTO_CLOSE_MS) {
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => {
+      const chat = this.current?.chat;
+      const typing = chat && (this.chatInput.value.trim() || this.chatInput.disabled || performance.now() - this.lastKey < AUTO_CLOSE_MS);
+      if (this.hovered || typing || this.asking) return this.autoClose(3000);
+      this.hide();
+    }, ms);
   }
 
   // The bar under her line (a download), 0..1; nothing hides it.
@@ -267,8 +294,10 @@ export class Panel {
   }
 
   // New buttons on the message on screen (in a chat: the app she offers to close), or none.
-  setActions(actions, onAction) {
+  // `asking`: a question waiting on you (an app's popup she read you): her panel stays until you answer
+  setActions(actions, onAction, { asking = false } = {}) {
     if (!this.current) return;
+    this.asking = asking && actions.length > 0;
     this.current.actions = actions;
     this.renderActions(actions, onAction);
     this.place();
@@ -299,6 +328,7 @@ export class Panel {
   // announcing the panel all over again.
   chatTurn({ quote, face }) {
     if (!this.current?.chat) return;
+    clearTimeout(this.hideTimer); // her last answer's countdown: you're talking again
     clearInterval(this.decodeTimer);
     this.stopStream();
     this.setFace(face);
@@ -315,6 +345,7 @@ export class Panel {
     if (!this.current?.chat) return;
     this.streamTo = [...text];
     this.streamDone = done;
+    if (done) this.autoClose(); // her answer's whole: her chat goes 10 s after, if you don't answer
     // an answer rewritten rather than added to (a reasoning block cut out, an error): from where they part
     let same = 0;
     const max = Math.min(this.streamShown, this.streamTo.length);

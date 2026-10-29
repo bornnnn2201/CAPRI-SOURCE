@@ -125,13 +125,17 @@ async function openaiChat(p, { model, messages }, onDelta, signal) {
 // only ever sees fixed arguments.
 
 const quote = (s) => (process.platform === 'win32' ? `"${s}"` : s); // cmd joins the arguments
+// where Claude Code's own installer puts it: found there even when she was started with a PATH from
+// before it was installed
+const OWN_CLAUDE = path.join(os.homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude');
+const claudeExe = () => (fs.existsSync(OWN_CLAUDE) ? quote(OWN_CLAUDE) : 'claude');
 // its session id, picked here so her hooks can tell its events from your other sessions' (main.js)
 let claudeSession = null;
 let claudeStarted = false; // each message after the first continues the same conversation
 
 function claudeVersion() {
   return new Promise((resolve, reject) => {
-    execFile('claude', ['--version'], { shell: process.platform === 'win32', timeout: 10000 }, (err, out) => (
+    execFile(claudeExe(), ['--version'], { shell: process.platform === 'win32', timeout: 10000 }, (err, out) => (
       err ? reject(new Error('Claude Code not found (is `claude` on your PATH?)')) : resolve(out.trim())));
   });
 }
@@ -145,9 +149,40 @@ function claudeChat(cfg, text, persona, onDelta, signal) {
     '--append-system-prompt-file', quote(personaFile)];
   if (!claudeSession) claudeSession = randomUUID();
   args.push(claudeStarted ? '--resume' : '--session-id', claudeSession);
+  return runClaude(cfg.claudeCwd || os.homedir(), args, text, onDelta, signal, () => { claudeStarted = true; });
+}
+
+// She looks at your screen through Claude Code: a session of its own, thrown away afterwards (no
+// screenshots piling up in her chat) and with no tools, so nothing on your screen can make it act.
+// The picture goes in on stdin as a stream-json message; the chat so far comes along as text.
+const lookSessions = new Set(); // their hook events aren't Claude working for you (isChatSession)
+function claudeLook({ persona, prompt, image, history = [] }, signal) {
+  const personaFile = path.join(os.tmpdir(), 'capri-persona-look.txt');
+  fs.writeFileSync(personaFile, persona);
+  const session = randomUUID();
+  lookSessions.add(session);
+  const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--tools', process.platform === 'win32' ? '""' : '', '--no-session-persistence', '--session-id', session,
+    '--append-system-prompt-file', quote(personaFile)];
+  const before = history.slice(-12).map((m) => `${m.role === 'user' ? 'User' : 'You'}: ${m.content}`).join('\n');
+  const message = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
+        { type: 'text', text: before ? `Your conversation so far:\n${before}\n\n${prompt}` : prompt },
+      ],
+    },
+  };
+  return runClaude(os.tmpdir(), args, JSON.stringify(message) + '\n', () => {}, signal)
+    .finally(() => setTimeout(() => lookSessions.delete(session), 60000)); // its last hooks come late
+}
+
+function runClaude(cwd, args, input, onDelta, signal, onStart = () => {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', args, {
-      cwd: cfg.claudeCwd || os.homedir(),
+    const child = spawn(claudeExe(), args, {
+      cwd,
       shell: process.platform === 'win32',
       windowsHide: true,
     });
@@ -168,7 +203,7 @@ function claudeChat(cfg, text, persona, onDelta, signal) {
         buffer = buffer.slice(nl + 1);
         let msg;
         try { msg = JSON.parse(line); } catch { continue; }
-        claudeStarted = true;
+        onStart();
         if (msg.type === 'assistant') {
           for (const block of msg.message?.content || []) {
             if (block.type !== 'text' || !block.text) continue;
@@ -182,7 +217,7 @@ function claudeChat(cfg, text, persona, onDelta, signal) {
       }
     });
     child.stderr.on('data', (chunk) => { errors += chunk; });
-    child.stdin.end(text);
+    child.stdin.end(input);
     child.on('error', reject);
     child.on('close', () => {
       if (signal.aborted) return reject(new Error('stopped'));
@@ -205,11 +240,11 @@ function restoreClaude(saved) {
   claudeStarted = Boolean(claudeSession && saved.started);
 }
 
-const isChatSession = (id) => Boolean(id) && id === claudeSession;
+const isChatSession = (id) => Boolean(id) && (id === claudeSession || lookSessions.has(id));
 
-async function chat(id, cfg, { model, messages }, onDelta, signal) {
+async function chat(id, cfg, { model, messages, keepAlive }, onDelta, signal) {
   const p = endpoint(id, cfg);
-  if (p.kind === 'ollama') return ollama.chat({ model, messages }, onDelta, signal);
+  if (p.kind === 'ollama') return ollama.chat({ model, messages, keepAlive }, onDelta, signal);
   // Claude Code keeps its own memory of the conversation: only her persona and your last message go
   if (p.kind === 'claude') return claudeChat(cfg, messages.at(-1).content, messages[0].content, onDelta, signal);
   return openaiChat(p, { model, messages }, onDelta, signal);
@@ -224,4 +259,4 @@ function isLocal(id, cfg, model) {
   return Boolean(PROVIDERS[id].local);
 }
 
-module.exports = { isLocal, PROVIDERS, CLAUDE_MODES, models, warm, chat, resetClaude, isChatSession, claudeMemory, restoreClaude };
+module.exports = { isLocal, PROVIDERS, CLAUDE_MODES, models, warm, chat, claudeLook, resetClaude, isChatSession, claudeMemory, restoreClaude };

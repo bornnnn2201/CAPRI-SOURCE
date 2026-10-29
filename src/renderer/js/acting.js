@@ -12,6 +12,7 @@
 //   long    that same arm drawn longer than it is, 1 = as drawn (longL / longR for one arm)
 //   smear   [x, y] trail of head multiples, px     echo   [x, y] green/red afterimages, px
 //   kickL / kickR   lower legs swinging outward, radians (when sitting)
+//   wall    the Blackwall showing through around her, 0-1   phase   columns of her slipping, 0-1
 //
 // A key can carry a cue as third item: capri.js fires effects and sounds when it's reached.
 // Directional acts are drawn leaning to screen-right; played with dir -1 they're mirrored.
@@ -22,7 +23,7 @@ const rep = (n, keys) => Array.from({ length: n }, () => keys).flat();
 
 export const NEUTRAL = {
   head: 0, mane: 0, hair: 0, tilt: 0, bob: 0, sx: 1, sy: 1, armL: 0, armR: 0, longL: 1, longR: 1,
-  smear: [0, 0], echo: [0, 0], kickL: 0, kickR: 0,
+  smear: [0, 0], echo: [0, 0], kickL: 0, kickR: 0, wall: 0, phase: 0,
 };
 
 export const ACTS = {
@@ -550,6 +551,106 @@ export const ACTS = {
       [1, { head: 0.08, mane: -0.1, arms: -0.2, bob: 1, smear: [0, 8] }], // a start
       [10, { head: 0.2, mane: -0.22, arms: -0.5, bob: 5 }],
       [2, { head: 0.1, arms: -0.2 }],
+      [1, {}],
+    ],
+  },
+
+  // ---- idle: what she does with herself when nobody needs her (capri.js idle) ----
+
+  // a stretch: arms up over the mane, up on her toes, a tremble at the top, dropped back past rest
+  stretch: {
+    priority: 1,
+    keys: [
+      [2, { arms: -0.12, bob: 2, sy: 0.96, sx: 1.03 }],
+      [2, { arms: 0.5, bob: -4, sy: 1.05, sx: 0.97, mane: 0.1, head: -0.06 }],
+      [3, { arms: 0.95, bob: -8, sy: 1.08, sx: 0.95, mane: 0.18, head: -0.1 }],
+      [8, { arms: 1.05, bob: -9, sy: 1.09, sx: 0.95, mane: 0.2, head: -0.12 }],
+      [1, { arms: 1.1, bob: -10, sy: 1.1, sx: 0.94, mane: 0.25, head: -0.13 }],
+      [5, { arms: 1.05, bob: -9, sy: 1.09, sx: 0.95, mane: 0.2, head: -0.12 }],
+      [2, { arms: 0.3, bob: -2, mane: 0.05 }],
+      [2, { arms: -0.18, bob: 3, sy: 0.95, sx: 1.04, mane: -0.08 }],
+      [3, { arms: -0.05, bob: 1 }],
+      [1, {}],
+    ],
+  },
+
+  // humming to herself: a lazy sway, the head going the other way, the mane swinging after it
+  sway: {
+    priority: 1,
+    keys: [
+      ...rep(2, [
+        [4, { tilt: -2.4, head: 0.07, hair: -3, bob: -1, arms: 0.04 }],
+        [2, { tilt: -1, head: 0.03, hair: -1, bob: -2 }],
+        [4, { tilt: 2.4, head: -0.07, hair: 3, bob: -1, arms: 0.04 }],
+        [2, { tilt: 1, head: -0.03, hair: 1, bob: -2 }],
+      ]),
+      [3, { head: 0.04, mane: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // scanning the net: her head sweeps slowly one way then the other, and the Blackwall stirs
+  scan: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { head: -0.04 }],
+      [2, { head: -0.1, mane: 0.04, wall: 0.16 }],
+      [3, { head: -0.16, mane: 0.06, wall: 0.24 }, 'notice'],
+      [6, { head: -0.18, mane: 0.06, wall: 0.24 }],
+      [2, { head: -0.08, wall: 0.18 }],
+      [2, { head: 0.04, wall: 0.18 }],
+      [2, { head: 0.12, mane: 0.05, wall: 0.22 }],
+      [6, { head: 0.18, mane: 0.08, tilt: 1.5, wall: 0.28 }],
+      [2, { head: 0.1, tilt: 0.6, wall: 0.14 }],
+      [2, { head: 0.02 }],
+      [1, {}],
+    ],
+  },
+
+  // bored stiff: head tipped back, mane drooping, a slow sink, then a shake to snap out of it
+  yawn: {
+    priority: 1,
+    keys: [
+      [3, { head: -0.06, bob: 1 }],
+      [4, { head: -0.16, mane: -0.08, bob: 2, arms: -0.12 }],
+      [12, { head: -0.2, mane: -0.14, bob: 4, arms: -0.2, sy: 0.98 }],
+      [2, { head: -0.1, mane: -0.06, bob: 2 }],
+      [1, { head: 0.1, mane: 0.2, smear: [-8, 0] }],
+      [1, { head: -0.1, mane: 0.22, smear: [8, 0] }],
+      [1, { head: 0.06, mane: 0.12 }],
+      [3, { mane: 0.04 }],
+      [1, {}],
+    ],
+  },
+
+  // Phasing: for a moment she's what she really is, data out of the Blackwall. Whole columns of her
+  // slip out of line, the wall shows through around her, and she snaps back together.
+  phase: {
+    priority: 2,
+    keys: [
+      [1, { wall: 0.3, phase: 0.06 }, 'phase'],
+      [2, { wall: 0.5, phase: 0.15, mane: 0.1 }],
+      [3, { wall: 0.65, phase: 0.26, mane: 0.16, bob: -2 }],
+      [2, { wall: 0.7, phase: 0.32, mane: 0.18, bob: -3 }],
+      [3, { wall: 0.6, phase: 0.24, mane: 0.16, bob: -3 }],
+      [1, { wall: 0.35, phase: 0.06, sx: 1.06, sy: 0.95, echo: [8, 0] }, 'snap'],
+      [2, { wall: 0.18, sx: 0.98, sy: 1.02, mane: 0.22 }],
+      [3, { wall: 0.08, mane: 0.06 }],
+      [1, {}],
+    ],
+  },
+
+  // a little wave at you (once she likes you): one hand up, wagging on twos
+  wave: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { reach: 0.4, head: 0.04 }],
+      [2, { reach: 1, head: 0.08, mane: 0.08, long: 1.05 }],
+      ...rep(3, [[2, { reach: 1.2, head: 0.1, long: 1.05 }], [2, { reach: 0.88, head: 0.08, long: 1.05 }]]),
+      [4, { reach: 1, head: 0.1, mane: 0.1 }],
+      [2, { reach: 0.35 }],
       [1, {}],
     ],
   },

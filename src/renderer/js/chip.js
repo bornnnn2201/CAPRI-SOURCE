@@ -9,6 +9,7 @@
 // open, blinking, while Claude is waiting on you. Click it and she comes back out (app.js).
 
 import { COLORS, drawMask } from './fx.js';
+import { CHIP_SIZE, DESIGNS, drawChip } from './chips.js';
 import { rand, reducedMotion } from './util.js';
 
 const STEP = 1000 / 12;
@@ -140,46 +141,118 @@ export class Mask extends Small {
 // ---------- put away ----------
 
 // bottom-left: the bottom-right corner is where the clock and the tray are, the pointer goes there all the time
-const MARGIN = { left: 26, bottom: 22 };
-const K = 0.6;
+const MARGIN = { left: 22, bottom: 14 };
+const K = 1.25; // how big it shows, of its design size (chips.js CHIP_SIZE): 280 x 85 px
 
-export class Chip extends Mask {
+// Put away (Ctrl+Alt+C): her shard in the bottom-left corner, on its side, her face on it (the look
+// her menu's config picks: chips.js). Eyes shut,
+// asleep on it; one cracks open now and then; the pointer over it half-opens them, following it;
+// open and blinking while Claude is waiting on you. Drawn only when something on it changes: still,
+// it costs nothing.
+export class Chip extends Small {
   constructor(canvas) {
-    super(canvas);
+    super(canvas, Math.round(CHIP_SIZE.w * K), Math.round(CHIP_SIZE.h * K));
+    this.style = DESIGNS[0].id;
     this.mode = 'idle'; // hers: idle | work | alert | sleep
+    this.drawn = '';
+    this.timer = 0;
+    this.nextPeek = 0;
+    this.peek = null;
   }
 
   // Bottom-left corner of a w x h screen.
   place(w, h) {
-    super.place(MARGIN.left + 50 * K, h - MARGIN.bottom - 54 * K, K);
-    this.face = { x: MARGIN.left + 50 * K, y: h - MARGIN.bottom - 54 * K };
+    this.moveTo(MARGIN.left, h - MARGIN.bottom - this.h);
+    this.drawn = ''; // drawn again where it is now
   }
 
+  // the middle of its screen, on screen: where she folds into it
   center() {
-    return { ...this.face };
+    const { face } = DESIGNS.find((d) => d.id === this.style) || DESIGNS[0];
+    return { x: this.x + face.x * K, y: this.y + face.y * K };
   }
 
-  // just the mask, spike and fang included
   contains(x, y, pad = 8) {
-    const { x: fx, y: fy } = this.face;
-    return x >= fx - 50 * K - pad && x <= fx + 50 * K + pad && y >= fy - 100 * K - pad && y <= fy + 54 * K + pad;
+    return x >= this.x - pad && x <= this.x + 214 * K + pad && y >= this.y + 10 * K - pad && y <= this.y + 58 * K + pad;
   }
 
   setMode(mode) {
     this.mode = mode;
   }
 
-  draw(now, frame) {
-    const { ctx } = this;
+  // one of chips.js's looks, by its id (config.chipStyle)
+  setStyle(id) {
+    if (!DESIGNS.some((d) => d.id === id) || id === this.style) return;
+    this.style = id;
+    this.drawn = '';
+  }
+
+  show() {
+    this.nextPeek = performance.now() + rand(4000, 8000);
+    this.drawn = '';
+    super.show();
+  }
+
+  hide() {
+    cancelAnimationFrame(this.timer);
+    super.hide();
+  }
+
+  // What this drawing shows, smooth with the clock (drawn at the screen's rate, 60 fps): the float,
+  // the glitter's drift, the light across the glass. Blinks, peeks and glitches stay snappy.
+  state(now) {
     const calm = reducedMotion.matches;
-    if (this.landing) {
-      drawMask(ctx, this.cx, this.cy, this.k, { flat: COLORS.paper });
+    const t = now / 1000;
+    const frame = Math.floor(now / STEP); // twelfths of a second, for what's on/off (blinks, the LED)
+    let eyes = [0, 0];
+    let look = null;
+    if (now > this.nextPeek && !this.peek && !calm) {
+      this.peek = { eye: Math.random() < 0.5 ? 0 : 1, until: now + rand(700, 1100) };
+      this.nextPeek = now + rand(6000, 13000);
+    }
+    if (this.peek && now > this.peek.until) this.peek = null;
+    if (this.peek) eyes[this.peek.eye] = 0.5;
+    if (this.pointer) {
+      eyes = [0.5, 0.5]; // stirring, watching your pointer
+      look = { x: (this.pointer.x - this.x) / K, y: (this.pointer.y - this.y) / K };
+    }
+    const blink = frame % 8 < 6;
+    if (this.mode === 'alert') eyes = calm || blink ? [1, 1] : [0, 0];
+    const bob = calm ? 0 : Math.sin(t * Math.PI) * 1.2 - 1.2; // a slow float, one up and down every 2 s
+    const shake = this.pointer && !calm && frame % 2 ? (frame % 4 < 2 ? -1 : 1) : 0;
+    const cycle = t % 5; // a glint across the prongs every five seconds
+    const glint = !calm && cycle < 0.8 ? Math.floor(cycle * 5) : -9;
+    // her glitter drifting along the glass (12 units a second), twinkling
+    const drift = calm ? 0 : t * 12;
+    const twinkle = calm ? 0 : Math.floor(t * 6);
+    const ledOn = this.mode === 'alert' || this.mode === 'work' ? blink : this.mode !== 'sleep';
+    // the light sweeping across the glass every four seconds, her face breathing, and a glitch now
+    // and then, more of them while Claude's at work
+    const roll = t % 4;
+    const scan = !calm && roll < 1.5 ? roll / 1.5 : -1;
+    const breath = calm ? 0 : Math.sin(t * 1.4) * 0.6;
+    if (!calm && now > (this.nextGlitch || 0)) {
+      this.glitchUntil = now + STEP * 2;
+      this.nextGlitch = now + rand(5000, 11000) / (this.mode === 'work' ? 2 : 1);
+    }
+    const glitch = now < (this.glitchUntil || 0) ? (Math.floor(now / 40) % 2 ? 3 : -3) : 0;
+    return { eyes, look, bob, shake, glint, blink, ledOn, scan, breath, glitch, drift, twinkle, mode: this.mode, flat: this.landing ? COLORS.paper : null };
+  }
+
+  // 60 fps while it's out (it moves smoothly: no drawing is the same twice), no more on a faster screen
+  loop(now) {
+    if (!this.visible) return;
+    const step = 1000 / 60;
+    if (now - this.last < step - 1) {
+      this.timer = requestAnimationFrame(this.loop);
       return;
     }
-    const bob = calm ? 0 : [0, -1.5, -3, -1.5][Math.floor(frame / 6) % 4];
-    // eyes shut; open, blinking, while Claude is waiting on you
-    const eyes = this.mode === 'alert' && (calm || frame % 8 < 6) ? [1, 1] : [0, 0];
-    const shake = this.pointer && !calm ? rand(-1, 1) : 0; // the pointer over her: she twitches
-    drawMask(ctx, this.cx + shake, this.cy + bob, this.k, { eyes });
+    // kept in step, 60 a second on average; after a pause (hidden, a slow frame), from now
+    this.last = now - this.last > step * 2 ? now : this.last + step;
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.setTransform(dpr * K, 0, 0, dpr * K, 0, 0);
+    this.ctx.clearRect(-4, -4, CHIP_SIZE.w + 8, CHIP_SIZE.h + 8);
+    drawChip(this.ctx, this.style, this.state(now));
+    this.timer = requestAnimationFrame(this.loop);
   }
 }
