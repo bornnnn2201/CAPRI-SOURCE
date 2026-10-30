@@ -205,13 +205,24 @@ function createOverlay() {
   overlay.loadURL('capri://app/src/renderer/index.html');
   // always shown: put away, she's still there as her biochip in the corner. Sized again first:
   // Windows keeps a new window inside the work area, and resting on the taskbar it covers it too.
-  overlay.once('ready-to-show', () => {
+  let shown = false;
+  const show = (why) => {
+    if (shown || !overlay || overlay.isDestroyed()) return;
+    shown = true;
     fitOverlay();
     overlay.showInactive();
-  });
+    startupNote(`shown (${why})`);
+  };
+  overlay.once('ready-to-show', () => show('ready'));
+  // her page slow to say it's ready (a busy PC at login): shown anyway, rather than never seen
+  setTimeout(() => show('late'), 8000);
   overlay.webContents.on('render-process-gone', (_e, details) => {
     console.error('[capri] renderer gone:', details.reason);
+    startupNote(`her page went (${details.reason}, exit ${details.exitCode}): loading it again`);
+    // her page crashed or was killed: back again, rather than an empty window till you restart her
+    if (details.reason !== 'clean-exit') setTimeout(() => overlay && !overlay.isDestroyed() && overlay.webContents.reload(), 1500);
   });
+  overlay.webContents.on('did-fail-load', (_e, code, desc) => startupNote(`her page didn't load (${code} ${desc})`));
   if (DEV) {
     overlay.webContents.on('console-message', (e) => {
       const { level, message, lineNumber, sourceId } = e;
@@ -223,6 +234,19 @@ function createOverlay() {
 
 function sendCommand(name, payload = {}) {
   overlay?.webContents.send('capri:command', { name, ...payload });
+}
+
+// How her starts went, kept in her folder (startup.log, the last 200 lines): when she won't come up,
+// there's why. On this PC only, like the rest.
+function startupNote(line) {
+  try {
+    const file = path.join(app.getPath('userData'), 'startup.log');
+    fs.appendFileSync(file, `${new Date().toISOString()} [${process.pid}] ${line}\n`);
+    const all = fs.readFileSync(file, 'utf8').trim().split('\n');
+    if (all.length > 400) fs.writeFileSync(file, all.slice(-200).join('\n') + '\n');
+  } catch {
+    // only a note
+  }
 }
 
 // Ctrl+Alt+C: she folds herself away into her biochip in the corner, or comes back out of it.
@@ -1366,10 +1390,26 @@ function applyRender() {
 function main() {
   applyRender();
   if (!app.requestSingleInstanceLock()) {
+    startupNote('already running: this launch hands over to her and goes');
     app.quit();
     return;
   }
-  app.on('second-instance', () => sendCommand('status')); // her shortcut clicked while she's up: she says so
+  startupNote(`starting (Electron ${process.versions.electron})`);
+  process.on('uncaughtException', (err) => startupNote(`main error: ${err?.stack || err}`));
+  app.on('child-process-gone', (_e, d) => d.reason !== 'clean-exit' && startupNote(`${d.type} process went (${d.reason}, exit ${d.exitCode})`));
+  // her shortcut clicked while she's up: out of her chip if she's put away, her window back up and on
+  // top, and she says hi (before, she only said her status, which nobody saw from her chip: it looked
+  // like she hadn't opened)
+  app.on('second-instance', () => {
+    startupNote('opened again while running: coming out');
+    if (overlay && !overlay.isDestroyed()) {
+      if (!overlay.isVisible()) overlay.showInactive();
+      overlay.setAlwaysOnTop(true, 'screen-saver');
+      overlay.moveTop();
+    }
+    if (!config.load().visible) toggleVisible(true);
+    sendCommand('status');
+  });
 
   // Below-normal priority for every process of hers, checked again now and then (her windows come and
   // go): whenever a game and she both want the processor, the game gets it first
