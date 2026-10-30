@@ -2,6 +2,7 @@ import { Capri } from './capri.js';
 import { SPRITE } from './sprite.js';
 import { FxLayer, GRAB_FRAMES } from './fx.js';
 import { Chip, Mask } from './chip.js';
+import { setChipFace } from './chips.js';
 import { Panel } from './panel.js';
 import { Voice } from './voice.js';
 import { Brain } from './brain.js';
@@ -55,6 +56,8 @@ async function boot() {
     document.fonts.load('600 16px "Chakra Petch"'),
     document.fonts.load('400 11px "JetBrains Mono"'),
   ]);
+  // her face from the show on her chip too (chips.js): its eyes, live, like hers
+  loadImage('../../assets/capri/capri-mask.png').then(setChipFace, () => {});
   document.documentElement.lang = config.lang;
   // her animations: like Windows, full or reduced (her menu)
   const applyMotion = (setting) => {

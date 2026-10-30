@@ -98,13 +98,81 @@ function face(ctx, s, x, y, k, spike = true) {
   drawMask(ctx, x + s.glitch, y + s.breath, k, { eyes: s.eyes, look: s.look, spike });
 }
 
-// just her eyes, glowing out of the dark (the mask's own eyes, the rest of it left in shadow)
+// Her face from the show, as on her sprite (assets/capri/capri-mask.png, set by app.js once loaded),
+// for the chips that show only her eyes, and where things are on it in its pixels: her eyes' middles,
+// how big the ring and iris are, and the turn that levels her eyes.
+let FACE = null;
+export function setChipFace(img) { FACE = img; }
+const CHIP_FACE = { eyes: [[75, 116], [202.3, 87.9]], mid: [138.7, 102], ring: 21.5, iris: 14.8, pupil: 5, turn: 0.22, span: 38 };
+
+// One of her eyes on the chip, as on her (sprite.js eye()), in the face's pixels: the show's socket
+// and thin ring around it are the picture's own, and inside the ring her big blue iris and white
+// pupil are drawn over its, turned `dir`; half shut, squeezed by her lids; shut, as she shuts them in
+// the show: her mask's green over the whole socket, a black curved slash across it.
+function chipEye(ctx, ex, ey, open, dir) {
+  const F = CHIP_FACE;
+  if (open < 0.15) {
+    ctx.beginPath(); ctx.ellipse(ex, ey, F.ring + 13, F.ring + 6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.green; ctx.fill();
+    ctx.beginPath(); // the slash: thick in the middle, to a point at each end
+    ctx.moveTo(ex - F.ring - 8, ey - 6);
+    ctx.quadraticCurveTo(ex, ey + 22, ex + F.ring + 8, ey - 10);
+    ctx.quadraticCurveTo(ex, ey + 6, ex - F.ring - 8, ey - 6);
+    ctx.fillStyle = COLORS.ink; ctx.fill();
+    return;
+  }
+  const disk = (dx, dy, rx, ry, color) => {
+    ctx.beginPath(); ctx.ellipse(ex + dx, ey + dy, rx, ry, 0, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  };
+  disk(0, 0, F.ring - 0.8, F.ring - 0.8, COLORS.ink); // inside her ring: the picture's own iris gone
+  const shift = (F.ring - 1 - F.iris) * 0.9;
+  disk(dir.x * shift, dir.y * shift, F.iris, F.iris * open, '#0f5cf5'); // her deep blue (sprite.js)
+  disk(dir.x * (shift + 6), dir.y * (shift + 6), F.pupil, F.pupil * open, COLORS.paper);
+}
+
+// just her eyes, glowing out of the dark: her face from the show, its eyes level, the window around
+// them; her vector mask until the picture's loaded
 function eyesOnly(ctx, s, x, y, k) {
   ctx.save();
   ctx.beginPath();
   ctx.rect(x - 34 * k, y - 12 * k, 68 * k, 24 * k);
   ctx.clip();
-  face(ctx, s, x, y, k);
+  if (!FACE) {
+    face(ctx, s, x, y, k);
+    ctx.restore();
+    return;
+  }
+  const F = CHIP_FACE;
+  const f = (F.span * k) / Math.hypot(F.eyes[1][0] - F.eyes[0][0], F.eyes[1][1] - F.eyes[0][1]);
+  const ox = x + s.glitch, oy = y + s.breath;
+  const draw = () => {
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.rotate(F.turn);
+    ctx.scale(f, f);
+    ctx.translate(-F.mid[0], -F.mid[1]);
+    ctx.drawImage(FACE, 0, 0);
+    F.eyes.forEach(([ex, ey], i) => {
+      // where it looks: toward the pointer (s.look, the chip's own units), turned into the face's
+      let dir = { x: 0, y: 0 };
+      if (s.look) {
+        const c = Math.cos(F.turn), sn = Math.sin(F.turn);
+        const lx = (ex - F.mid[0]) * f, ly = (ey - F.mid[1]) * f;
+        const at = { x: ox + lx * c - ly * sn, y: oy + lx * sn + ly * c };
+        const dx = s.look.x - at.x, dy = s.look.y - at.y, d = Math.hypot(dx, dy) || 1;
+        dir = { x: (dx / d) * c + (dy / d) * sn, y: -(dx / d) * sn + (dy / d) * c };
+      }
+      chipEye(ctx, ex, ey, s.eyes?.[i] ?? 1, dir);
+    });
+    ctx.restore();
+  };
+  if (s.glitch) { // torn sideways for a drawing: her colours pulled apart
+    ctx.globalAlpha = 0.5;
+    ctx.save(); ctx.translate(-3, 0); draw(); ctx.restore();
+    ctx.save(); ctx.translate(3, 0); draw(); ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  draw();
   ctx.restore();
 }
 
