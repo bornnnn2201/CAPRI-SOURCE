@@ -167,45 +167,51 @@ export function drawMask(ctx, x, y, k, { eyes = [1, 1], look = null, spike = tru
   ctx.stroke();
   MASK.eyes.forEach(([ex, ey], i) => {
     const o = eyes[i];
-    if (o < 0.15) {
-      // shut
+    // her eyes as on her (sprite.js eye()): an almond socket of ink with spiked corners, her thin
+    // green ring, the blue iris and round white pupil turned toward `look`; shut, the socket stays
+    // dark with a line of green across it
+    const socket = () => {
+      const side = i ? -1 : 1; // the spikes mirror from one eye to the other, as in the show
       ctx.beginPath();
-      ctx.moveTo(ex - 15, ey - 4);
-      ctx.lineTo(ex, ey + 5);
-      ctx.lineTo(ex + 15, ey - 4);
-      ctx.strokeStyle = COLORS.ink;
-      ctx.lineWidth = 4.5;
+      ctx.moveTo(-20, 0);
+      ctx.quadraticCurveTo(0, -24, 20, 0);
+      ctx.quadraticCurveTo(0, 24, -20, 0);
+      ctx.moveTo(side * 6, -10); ctx.lineTo(side * 15, -22); ctx.lineTo(side * 13, -6); // a spike up
+      ctx.moveTo(-side * 6, 10); ctx.lineTo(-side * 16, 21); ctx.lineTo(-side * 13, 6); // and one down
+      ctx.fillStyle = COLORS.ink;
+      ctx.fill();
+    };
+    ctx.save();
+    ctx.translate(ex, ey);
+    if (o < 0.15) {
+      socket();
+      ctx.beginPath();
+      ctx.moveTo(-14, 1);
+      ctx.quadraticCurveTo(0, 6, 14, 1);
+      ctx.strokeStyle = COLORS.green;
+      ctx.lineWidth = 2.6;
       ctx.stroke();
+      ctx.restore();
       return;
     }
     let px = 0, py = 0;
     if (look) {
       const d = Math.hypot(look.x - (x + ex * k), look.y - (y + ey * k)) || 1;
-      px = ((look.x - (x + ex * k)) / d) * 2.6;
-      py = ((look.y - (y + ey * k)) / d) * 2.2;
+      px = ((look.x - (x + ex * k)) / d) * 3;
+      py = ((look.y - (y + ey * k)) / d) * 2.4;
     }
-    ctx.save();
-    ctx.translate(ex, ey);
+    socket();
     ctx.scale(1, o);
-    ctx.beginPath(); // an almond of ink
-    ctx.moveTo(-19, 0);
-    ctx.quadraticCurveTo(0, -24, 19, 0);
-    ctx.quadraticCurveTo(0, 24, -19, 0);
-    ctx.fillStyle = COLORS.ink;
-    ctx.fill();
     const disk = (dx, dy, r, color) => {
       ctx.beginPath();
       ctx.arc(dx, dy, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
     };
-    disk(px * 0.4, py * 0.4, 10.5, COLORS.green);
-    disk(px * 0.4, py * 0.4, 8.8, COLORS.ink);
-    disk(px * 0.7, py * 0.7, 7.6, COLORS.blue);
-    ctx.beginPath();
-    ctx.ellipse(px, py, 3, 4, 0, 0, Math.PI * 2);
-    ctx.fillStyle = COLORS.paper;
-    ctx.fill();
+    disk(0, 0, 11, COLORS.green); // her ring, thin
+    disk(0, 0, 9.6, COLORS.ink);
+    disk(px * 0.75, py * 0.75, 7.8, '#1f80ff'); // her blue (sprite.js)
+    disk(px, py, 3.4, COLORS.paper);
     ctx.restore();
   });
   ctx.restore();

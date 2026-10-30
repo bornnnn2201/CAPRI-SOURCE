@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('host', {
   onResize: on('overlay:resize'),
   onWindows: on('windows:update'),
   onSeat: on('windows:seat'),
+  onPointer: on('overlay:pointer'),
   watchSeat: (id) => ipcRenderer.send('windows:seat', id),
   setInteractive: (on) => ipcRenderer.send('overlay:interactive', Boolean(on)),
   rearm: () => ipcRenderer.send('overlay:rearm'),

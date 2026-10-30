@@ -11,6 +11,7 @@ const START_MS = 60;        // this long above the noise and it's someone talkin
 const END_MS = 600;         // this long quiet and they're done (short: she answers her name fast)
 const VOICED_MS = 128;      // at least this much of it with a voice's pitch in it (voiced), or it's noise:
                             // on your own recordings, noise had 64 ms at most, your shortest word 192
+const NAME_VOICED_MS = 220; // the same, while she only listens for her name
 const VOICED_R = 0.6;       // how alike a chunk is to itself one pitch later, to count as voiced
 const END_AWAKE_MS = 1400;  // once she's listening to a request: you may stop to think
 const MIN_MS = 350;         // shorter: a click, a cough
@@ -533,7 +534,10 @@ export class Speech {
       // too little of it voiced: keys, a clap, a door; no need to wake Whisper for that
       // 'pc': clearly louder through the PC than your microphone (it hears your speakers a little too)
       const from = this.pcStream && this.segE[1] > this.segE[0] * 1.5 ? 'pc' : 'you';
-      if (spoken >= MIN_MS && this.voicedMs >= VOICED_MS) this.heard(seg, rate, spoken, this.segAt, from);
+      // listening for her name only: more of a voice in it before Whisper's woken (her name alone has
+      // ~400 ms of it; claps, whooshes and coughs got through at 128 and cost the graphics card a run each)
+      const voicedNeed = this.segAt < this.awakeUntil ? VOICED_MS : NAME_VOICED_MS;
+      if (spoken >= MIN_MS && this.voicedMs >= voicedNeed) this.heard(seg, rate, spoken, this.segAt, from);
     }
   }
 

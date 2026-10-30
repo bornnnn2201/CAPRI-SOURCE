@@ -148,17 +148,37 @@ function fitOverlay() {
   overlay.webContents.send('overlay:resize', { width: area.width, height: area.height, gap });
 }
 
-// The pointer reaches her click-through window through a mouse hook, and Windows drops a hook that
-// doesn't answer in time without a word (waking from sleep, a locked screen, a stall): she can't be
-// clicked anymore. Off then on puts in a new one; her place on top and her size are set again too.
+// After sleep, a locked screen or a stall: her window click-through again, back on top, sized again,
+// and she waits for the pointer to be on her.
 function rearmOverlay() {
   if (!overlay || overlay.isDestroyed()) return;
   overlay.setIgnoreMouseEvents(false);
-  overlay.setIgnoreMouseEvents(true, { forward: true });
+  overlay.setIgnoreMouseEvents(true);
   overlay.setAlwaysOnTop(true, 'screen-saver');
   fitOverlay();
-  sendCommand('rearmed'); // click-through again: she waits for the pointer to be on her
-  console.log('[capri] mouse hook set up again');
+  sendCommand('rearmed');
+  console.log('[capri] her window set up again');
+}
+
+// Where the pointer is, for her (hovering her, her eyes, pats, her chip), read ~30 times a second and
+// sent to her page when it moves over her screen. This replaces Electron's forwarded mouse moves:
+// those come through a low-level mouse hook that every mouse move and click on the whole PC waits
+// on, and with her running below normal priority (yieldToGames), a busy PC made your clicks lag. Over
+// her (her window not click-through) her page gets the real moves as well.
+function watchPointer() {
+  let last = null;
+  let wasIn = false;
+  setInterval(() => {
+    if (!overlay || overlay.isDestroyed() || !overlay.isVisible()) return;
+    const p = screen.getCursorScreenPoint();
+    if (last && p.x === last.x && p.y === last.y) return;
+    last = p;
+    const b = windowWatch?.home() ?? overlay.getBounds();
+    const inside = p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height;
+    if (!inside && !wasIn) return; // somewhere else: nothing to tell her
+    wasIn = inside;
+    overlay.webContents.send('overlay:pointer', { x: p.x - b.x, y: p.y - b.y, inside });
+  }, 33);
 }
 
 // Back on top of everything, the taskbar included (it comes up over her when it's clicked). Twice:
@@ -201,7 +221,7 @@ function createOverlay() {
   });
 
   overlay.setAlwaysOnTop(true, 'screen-saver');
-  overlay.setIgnoreMouseEvents(true, { forward: true });
+  overlay.setIgnoreMouseEvents(true);
   overlay.loadURL('capri://app/src/renderer/index.html');
   // always shown: put away, she's still there as her biochip in the corner. Sized again first:
   // Windows keeps a new window inside the work area, and resting on the taskbar it covers it too.
@@ -952,7 +972,7 @@ function createTray() {
 
 function registerIpc() {
   ipcMain.on('overlay:interactive', (_e, on) => {
-    overlay?.setIgnoreMouseEvents(!on, { forward: true });
+    overlay?.setIgnoreMouseEvents(!on);
   });
   ipcMain.on('overlay:rearm', () => rearmOverlay()); // the pointer moved over her and she never heard of it
   ipcMain.handle('overlay:cursor', () => {
@@ -1455,6 +1475,7 @@ function main() {
     }
     quickState().then(() => rebuildTray()); // her menu knows whether her quick brain's there
     createOverlay();
+    watchPointer();
     createTray();
     if (config.load().listen && speech.state(config.load()).ears) speech.warm(); // her ears ready before you call her
     windowWatch = startWindowWatch({

@@ -175,6 +175,18 @@ async function boot() {
     refreshHit();
     hoverChip();
   });
+  // While her window lets clicks through it gets no mouse moves (no system-wide mouse hook: every
+  // click on the PC waited on that): main.js reads the pointer ~30 times a second and says where it
+  // is, played here as the mouse moves everything above and in capri.js listens for. Over her, her
+  // window isn't click-through and has the real ones.
+  host.onPointer?.((p) => {
+    if (interactive) return;
+    if (!p.inside) {
+      if (mouse) document.dispatchEvent(new MouseEvent('mouseleave'));
+      return;
+    }
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: p.x, clientY: p.y }));
+  });
   // Where the pointer really is, every couple of seconds: if it moved over her window and no
   // mousemove came, the hook that brings it to her is gone (Windows drops it without a word, after
   // sleep say), and main.js puts in a new one.

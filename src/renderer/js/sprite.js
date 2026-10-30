@@ -56,8 +56,8 @@ uniform float uBlink; // her eyes shut, 0 (open) to 1 (shut)
 // her eyes in her mask (from tools/recolor-sprite.mjs: keep in step), drawn live over its own
 const vec2 EYE_L = vec2(106.1, 131.2);
 const vec2 EYE_R = vec2(133.5, 130.1);
-const float EYE_IRIS = 3.1;
-const float EYE_RING = 4.7;
+const float EYE_IRIS = 3.4; // a touch bigger than her mask's own, as big as the show draws them
+const float EYE_RING = 5.1;
 
 // landmarks, in sprite pixels (capri-full.png is 240x420, see tools/build-sprite.py)
 const vec2 NECK = vec2(118.0, 152.0);   // the head tilts around this
@@ -132,23 +132,27 @@ vec3 grade(vec3 c, out float red) {
 vec4 eye(vec2 s, vec2 at) {
   vec2 d = s - at;
   float r = length(d);
-  if (r > EYE_RING + 0.6) return vec4(0.0);
-  float aa = 0.6; // about a screen pixel of soft edge
+  if (r > EYE_RING + 0.6 + uPx) return vec4(0.0);
+  // at her size an eye is a few screen pixels across: every edge spread over about one of those
+  // (a pixel's worth of coverage, worked out, not sampled: this is inlined into every cel()), and her
+  // ring never thinner than most of one, or it flickers
+  float aa = 0.15 + uPx * 0.45;
+  float band = max(0.45, uPx * 0.38);
   vec3 ink = vec3(0.03, 0.02, 0.05);
   vec3 green = vec3(0.21, 1.0, 0.48);
   vec3 c = ink;
   float open = 1.0 - uBlink;
-  float ring = (1.0 - smoothstep(0.35, 0.35 + aa, abs(r - EYE_RING * 0.9))) * open;
+  float ring = (1.0 - smoothstep(band, band + aa, abs(r - EYE_RING * 0.88))) * open;
   c = mix(c, green, ring);
   // the iris rolls toward where she looks, the pupil a little further; both squeeze shut with her lids
   vec2 io = d - uLook * EYE_IRIS * 0.42;
   float iris = 1.0 - smoothstep(EYE_IRIS - aa, EYE_IRIS, length(vec2(io.x, io.y / max(0.05, open))));
-  c = mix(c, vec3(0.08, 0.42, 1.0), iris * step(0.05, open));
+  c = mix(c, vec3(0.12, 0.5, 1.0), iris * step(0.05, open));
   vec2 po = d - uLook * EYE_IRIS * 0.62;
-  float pupil = 1.0 - smoothstep(1.1 - aa, 1.1, length(vec2(po.x, po.y / max(0.05, open))));
+  float pupil = 1.0 - smoothstep(1.4 - aa, 1.4, length(vec2(po.x, po.y / max(0.05, open))));
   c = mix(c, vec3(1.0, 0.98, 0.98), pupil * step(0.05, open));
   // shut: her lid's line
-  float lid = (1.0 - smoothstep(0.3, 0.3 + aa, abs(d.y - 0.8 + d.x * d.x * 0.05))) * step(abs(d.x), EYE_RING * 0.85) * smoothstep(0.6, 0.9, uBlink);
+  float lid = (1.0 - smoothstep(band, band + aa, abs(d.y - 0.8 + d.x * d.x * 0.05))) * step(abs(d.x), EYE_RING * 0.85) * smoothstep(0.6, 0.9, uBlink);
   c = mix(c, green, lid);
   float a = 1.0 - smoothstep(EYE_RING + 0.6 - aa, EYE_RING + 0.6, r);
   return vec4(c * a, a);
@@ -158,9 +162,8 @@ vec4 eye(vec2 s, vec2 at) {
 vec4 cel(vec2 s) {
   vec4 c = tex(s);
   if (c.a <= 0.0) return vec4(0.0);
-  // her eyes, over her mask's own
-  vec4 e = eye(s, EYE_L);
-  if (e.a <= 0.0) e = eye(s, EYE_R);
+  // her eyes, over her mask's own (the nearer one: one eye's worth of code here, cel() is everywhere)
+  vec4 e = eye(s, distance(s, EYE_L) < distance(s, EYE_R) ? EYE_L : EYE_R);
   if (e.a >= 0.999) return e;
   float red;
   c.rgb = grade(c.rgb, red);
@@ -520,16 +523,19 @@ export class SpriteRenderer {
     };
   }
 
+  // Drawn at twice the screen's pixels and brought down by the page: every edge of her, and her eyes
+  // (a few pixels across at her size), come out smooth instead of stair-stepped. Her canvas is small,
+  // so it's still very little work.
   resize(scale) {
     this.scale = scale;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = (window.devicePixelRatio || 1) * 2;
     const { width, height } = SpriteRenderer.cssSize(scale);
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    this.gl.uniform1f(this.u.uPx, 1 / (scale * dpr));
+    this.gl.uniform1f(this.u.uPx, 1 / (scale * (window.devicePixelRatio || 1))); // a screen pixel, not one of the canvas's
   }
 
   draw(s) {
