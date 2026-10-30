@@ -156,7 +156,19 @@ for (const side of [blues.filter(([x]) => x < split), blues.filter(([x]) => x >=
   const cx = side.reduce((t, [x]) => t + x, 0) / side.length, cy = side.reduce((t, [, y]) => t + y, 0) / side.length;
   const iris = Math.sqrt(side.length / Math.PI); // its radius, as a disc
   const [ex, ey] = toSprite(cx, cy);
-  console.log(`eye at (${ex.toFixed(1)}, ${ey.toFixed(1)}), iris ${(iris * k).toFixed(2)} px, ring ${(iris * k * 1.5).toFixed(2)} px`);
+  const ring = iris * k * 1.5;
+  console.log(`eye at (${ex.toFixed(1)}, ${ey.toFixed(1)}), iris ${(iris * k).toFixed(2)} px, ring ${ring.toFixed(2)} px`);
+  // its picture's iris, ring and pupil gone, its socket (the show's almond and spikes) left in ink: the
+  // shader draws the eye that moves in it
+  for (let y = Math.floor(ey - ring - 2); y <= ey + ring + 2; y++) {
+    for (let x = Math.floor(ex - ring - 2); x <= ex + ring + 2; x++) {
+      let cover = 0;
+      for (let sy = 0; sy < 4; sy++) for (let sx = 0; sx < 4; sx++) cover += Math.hypot(x + (sx + 0.5) / 4 - ex, y + (sy + 0.5) / 4 - ey) <= ring + 1.1 ? 1 / 16 : 0;
+      if (!cover) continue;
+      const i = at(x, y);
+      for (let q = 0; q < 3; q++) px[i + q] = Math.round(px[i + q] * (1 - cover) + [12, 8, 18][q] * cover);
+    }
+  }
 }
 
 fs.writeFileSync(raw, px);

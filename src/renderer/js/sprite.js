@@ -56,8 +56,9 @@ uniform float uBlink; // her eyes shut, 0 (open) to 1 (shut)
 // her eyes in her mask (from tools/recolor-sprite.mjs: keep in step), drawn live over its own
 const vec2 EYE_L = vec2(106.1, 131.2);
 const vec2 EYE_R = vec2(133.5, 130.1);
-const float EYE_IRIS = 3.4; // a touch bigger than her mask's own, as big as the show draws them
-const float EYE_RING = 5.1;
+const float EYE_IRIS = 3.9; // her big blue iris, most of the eye, as the show draws it
+const float EYE_RING = 5.4; // her thin green ring, out at the edge of the eye
+const float EYE_OUT = 5.9;  // the eye's round middle, cleared to ink in her sprite (its socket's points stay)
 
 // landmarks, in sprite pixels (capri-full.png is 240x420, see tools/build-sprite.py)
 const vec2 NECK = vec2(118.0, 152.0);   // the head tilts around this
@@ -126,35 +127,37 @@ vec3 grade(vec3 c, out float red) {
   return hsv2rgb(h);
 }
 
-// One of her eyes, alive, as the show draws them: in its black socket her thin green ring, the blue
-// iris and white pupil inside it turned where she looks; shut, the socket goes dark with a line of
-// green across it. Premultiplied, alpha 0 outside it.
+// One of her eyes, alive, as the show draws them, in the middle of its socket (the socket's almond
+// and spiked points are her sprite's own, from the show): her thin green ring out at its edge, a big
+// deep-blue iris filling most of it and a small white pupil, turned where she looks. Shut, as she
+// shuts them in the show: the green of her mask over it, a black curved slash across. Premultiplied,
+// alpha 0 outside its round middle.
 vec4 eye(vec2 s, vec2 at) {
   vec2 d = s - at;
   float r = length(d);
-  if (r > EYE_RING + 0.6 + uPx) return vec4(0.0);
+  if (r > EYE_OUT + uPx) return vec4(0.0);
   // at her size an eye is a few screen pixels across: every edge spread over about one of those
   // (a pixel's worth of coverage, worked out, not sampled: this is inlined into every cel()), and her
   // ring never thinner than most of one, or it flickers
   float aa = 0.15 + uPx * 0.45;
-  float band = max(0.45, uPx * 0.38);
+  float band = max(0.3, uPx * 0.28);
   vec3 ink = vec3(0.03, 0.02, 0.05);
   vec3 green = vec3(0.21, 1.0, 0.48);
-  vec3 c = ink;
+  float shut = smoothstep(0.5, 0.9, uBlink);
   float open = 1.0 - uBlink;
-  float ring = (1.0 - smoothstep(band, band + aa, abs(r - EYE_RING * 0.88))) * open;
-  c = mix(c, green, ring);
+  vec3 c = ink;
+  c = mix(c, green * 0.85, (1.0 - smoothstep(band, band + aa, abs(r - EYE_RING))) * open);
   // the iris rolls toward where she looks, the pupil a little further; both squeeze shut with her lids
-  vec2 io = d - uLook * EYE_IRIS * 0.42;
+  vec2 io = d - uLook * (EYE_RING - EYE_IRIS) * 0.9;
   float iris = 1.0 - smoothstep(EYE_IRIS - aa, EYE_IRIS, length(vec2(io.x, io.y / max(0.05, open))));
-  c = mix(c, vec3(0.12, 0.5, 1.0), iris * step(0.05, open));
-  vec2 po = d - uLook * EYE_IRIS * 0.62;
-  float pupil = 1.0 - smoothstep(1.4 - aa, 1.4, length(vec2(po.x, po.y / max(0.05, open))));
+  c = mix(c, vec3(0.06, 0.36, 0.96), iris * step(0.05, open));
+  vec2 po = d - uLook * (EYE_RING - EYE_IRIS + 1.0);
+  float pupil = 1.0 - smoothstep(1.15 - aa, 1.15, length(vec2(po.x, po.y / max(0.05, open))));
   c = mix(c, vec3(1.0, 0.98, 0.98), pupil * step(0.05, open));
-  // shut: her lid's line
-  float lid = (1.0 - smoothstep(band, band + aa, abs(d.y - 0.8 + d.x * d.x * 0.05))) * step(abs(d.x), EYE_RING * 0.85) * smoothstep(0.6, 0.9, uBlink);
-  c = mix(c, green, lid);
-  float a = 1.0 - smoothstep(EYE_RING + 0.6 - aa, EYE_RING + 0.6, r);
+  // shut: the green of her mask, a black curved slash across it (down at the middle, as her smug eyes)
+  float slash = 1.0 - smoothstep(band + 0.35, band + 0.35 + aa, abs(d.y - 0.6 - (1.0 - d.x * d.x / 30.0) * 1.2));
+  c = mix(c, mix(green, ink, slash * step(abs(d.x), EYE_OUT * 0.92)), shut);
+  float a = 1.0 - smoothstep(EYE_OUT - aa, EYE_OUT, r);
   return vec4(c * a, a);
 }
 
