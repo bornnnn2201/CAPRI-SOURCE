@@ -95,6 +95,22 @@ async function boot() {
     voice,
   });
   capri.wander = config.wander;
+  // what you type to her: her eyes on it, following the end of it as it grows (capri.updateEyes)
+  const measure = document.createElement('canvas').getContext('2d');
+  panel.chatInput.addEventListener('input', () => {
+    const input = panel.chatInput;
+    capri.typing = {
+      at: performance.now(),
+      caret: () => {
+        const r = input.getBoundingClientRect();
+        const css = getComputedStyle(input);
+        measure.font = css.font;
+        const before = input.value.slice(0, input.selectionStart ?? input.value.length);
+        const x = r.left + (parseFloat(css.paddingLeft) || 0) + measure.measureText(before).width - input.scrollLeft;
+        return { x: Math.min(r.right - 6, Math.max(r.left, x)), y: r.top + r.height / 2 };
+      },
+    };
+  });
   capri.possessWindows = config.possess;
   capri.restOn = config.rest || 'corner';
   capri.setView(innerWidth, innerHeight, innerHeight - floorGap);

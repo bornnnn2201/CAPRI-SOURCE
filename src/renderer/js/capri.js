@@ -467,8 +467,52 @@ export class Capri {
   drawFrame(now = performance.now()) {
     this.lastDraw = now;
     this.animate(now);
+    this.updateEyes(now);
     this.sprite.draw(this.p);
     this.place();
+  }
+
+  // Her eyes, alive (the shader draws them over her mask's): a blink every few seconds, now and then
+  // two, shut while she sleeps; and where she looks. What she's pointing or zapping at; the message
+  // you're typing to her, following it as it grows; now and then your pointer, more often once she's
+  // bored; else a glance somewhere every second or few, and back at you. They snap there, as drawn.
+  updateEyes(now) {
+    const e = this.eyes || (this.eyes = { look: { x: 0, y: 0 }, to: { x: 0, y: 0 }, nextLook: now + 1200, blinkAt: now + 2500, double: false, blinkStart: -1e9 });
+    if (now >= e.blinkAt) {
+      e.blinkStart = now;
+      e.blinkAt = now + (e.double ? 260 : rand(2200, 6500));
+      e.double = !e.double && Math.random() < 0.2;
+    }
+    const shut = this.mode === 'sleep' || this.dormant;
+    this.p.blink = shut || now - e.blinkStart < 140 ? 1 : 0; // shut for a drawing or two, no in-between
+    const toward = (pt) => {
+      const h = this.head();
+      const dx = pt.x - h.x, dy = pt.y - h.y;
+      const d = Math.max(Math.hypot(dx, dy), 160);
+      // in her drawing's space: mirrored when she faces the other way
+      return { x: clamp(dx / d, -1, 1) * this.facing, y: clamp(dy / d, -1, 1) };
+    };
+    const typing = this.typing && now - this.typing.at < 1600 ? this.typing : null;
+    if (this.pointing?.aim) e.to = toward(this.pointing.aim);
+    else if (this.zapAt) e.to = toward(this.zapAt);
+    else if (typing) e.to = toward(typing.caret()); // your message, as you write it
+    else if (now >= e.nextLook) {
+      const bored = now - this.lastActivity > 60 * 1000;
+      const roll = Math.random();
+      if (this.mouse && roll < (bored ? 0.45 : 0.16)) {
+        e.to = toward(this.mouse); // looking for your pointer
+        e.nextLook = now + rand(1400, 3000);
+      } else if (roll < 0.55) {
+        e.to = { x: 0, y: 0 }; // at you
+        e.nextLook = now + rand(1500, 4000);
+      } else {
+        e.to = { x: rand(-1, 1), y: rand(-0.7, 0.6) }; // somewhere
+        e.nextLook = now + rand(700, 2600);
+      }
+    }
+    e.look.x += (e.to.x - e.look.x) * 0.75;
+    e.look.y += (e.to.y - e.look.y) * 0.75;
+    this.p.look = [e.look.x, e.look.y];
   }
 
   // Pick the drawing: the stance's cycle underneath, the current act on top.

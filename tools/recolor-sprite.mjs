@@ -140,6 +140,25 @@ for (let y = TO.y - reach; y <= TO.y + reach; y++) {
   }
 }
 
+// where her eyes ended up on the sprite (their blue irises' middles, and how big), for the live eyes
+// the shader draws over them (sprite.js EYE_L / EYE_R / EYE_RING: keep them in step)
+const toSprite = (fx, fy) => {
+  const dx = fx - mx, dy = fy - my, c = Math.cos(turn), s = Math.sin(turn);
+  return [TO.x + (dx * c - dy * s) * k, TO.y + (dx * s + dy * c) * k];
+};
+const blues = [];
+for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+  const i = fat(x, y);
+  if (face[i + 3] > 128 && face[i + 2] > 150 && face[i + 2] > face[i] * 2 && face[i + 2] > face[i + 1] * 1.25) blues.push([x, y]);
+}
+const split = blues.map(([x]) => x).sort((p, q) => p - q)[blues.length >> 1];
+for (const side of [blues.filter(([x]) => x < split), blues.filter(([x]) => x >= split)]) {
+  const cx = side.reduce((t, [x]) => t + x, 0) / side.length, cy = side.reduce((t, [, y]) => t + y, 0) / side.length;
+  const iris = Math.sqrt(side.length / Math.PI); // its radius, as a disc
+  const [ex, ey] = toSprite(cx, cy);
+  console.log(`eye at (${ex.toFixed(1)}, ${ey.toFixed(1)}), iris ${(iris * k).toFixed(2)} px, ring ${(iris * k * 1.5).toFixed(2)} px`);
+}
+
 fs.writeFileSync(raw, px);
 execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${W}x${H}`, '-i', raw, FILE]);
 fs.rmSync(raw, { force: true });

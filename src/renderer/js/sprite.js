@@ -50,6 +50,14 @@ uniform float uPx; // sprite pixels per screen pixel
 uniform float uTime;  // seconds, for what streams (the Blackwall's columns)
 uniform float uWall;  // the Blackwall showing through around her, 0 to 1
 uniform float uPhase; // whole columns of her slipping out of line, 0 to 1
+uniform vec2 uLook;   // where her eyes look, -1 to 1 each way (sprite space), 0 0 straight ahead
+uniform float uBlink; // her eyes shut, 0 (open) to 1 (shut)
+
+// her eyes in her mask (from tools/recolor-sprite.mjs: keep in step), drawn live over its own
+const vec2 EYE_L = vec2(106.1, 131.2);
+const vec2 EYE_R = vec2(133.5, 130.1);
+const float EYE_IRIS = 3.1;
+const float EYE_RING = 4.7;
 
 // landmarks, in sprite pixels (capri-full.png is 240x420, see tools/build-sprite.py)
 const vec2 NECK = vec2(118.0, 152.0);   // the head tilts around this
@@ -118,10 +126,42 @@ vec3 grade(vec3 c, out float red) {
   return hsv2rgb(h);
 }
 
+// One of her eyes, alive, as the show draws them: in its black socket her thin green ring, the blue
+// iris and white pupil inside it turned where she looks; shut, the socket goes dark with a line of
+// green across it. Premultiplied, alpha 0 outside it.
+vec4 eye(vec2 s, vec2 at) {
+  vec2 d = s - at;
+  float r = length(d);
+  if (r > EYE_RING + 0.6) return vec4(0.0);
+  float aa = 0.6; // about a screen pixel of soft edge
+  vec3 ink = vec3(0.03, 0.02, 0.05);
+  vec3 green = vec3(0.21, 1.0, 0.48);
+  vec3 c = ink;
+  float open = 1.0 - uBlink;
+  float ring = (1.0 - smoothstep(0.35, 0.35 + aa, abs(r - EYE_RING * 0.9))) * open;
+  c = mix(c, green, ring);
+  // the iris rolls toward where she looks, the pupil a little further; both squeeze shut with her lids
+  vec2 io = d - uLook * EYE_IRIS * 0.42;
+  float iris = 1.0 - smoothstep(EYE_IRIS - aa, EYE_IRIS, length(vec2(io.x, io.y / max(0.05, open))));
+  c = mix(c, vec3(0.08, 0.42, 1.0), iris * step(0.05, open));
+  vec2 po = d - uLook * EYE_IRIS * 0.62;
+  float pupil = 1.0 - smoothstep(1.1 - aa, 1.1, length(vec2(po.x, po.y / max(0.05, open))));
+  c = mix(c, vec3(1.0, 0.98, 0.98), pupil * step(0.05, open));
+  // shut: her lid's line
+  float lid = (1.0 - smoothstep(0.3, 0.3 + aa, abs(d.y - 0.8 + d.x * d.x * 0.05))) * step(abs(d.x), EYE_RING * 0.85) * smoothstep(0.6, 0.9, uBlink);
+  c = mix(c, green, lid);
+  float a = 1.0 - smoothstep(EYE_RING + 0.6 - aa, EYE_RING + 0.6, r);
+  return vec4(c * a, a);
+}
+
 // Graded, speckled, premultiplied sample of the figure.
 vec4 cel(vec2 s) {
   vec4 c = tex(s);
   if (c.a <= 0.0) return vec4(0.0);
+  // her eyes, over her mask's own
+  vec4 e = eye(s, EYE_L);
+  if (e.a <= 0.0) e = eye(s, EYE_R);
+  if (e.a >= 0.999) return e;
   float red;
   c.rgb = grade(c.rgb, red);
   // her glitter on the red parts, as the show paints it: fine and dense, pink with white sparks in
@@ -137,7 +177,7 @@ vec4 cel(vec2 s) {
     c.rgb = mix(c.rgb, vec3(1.0, 0.95, 0.97), clamp((star + tw) * red * uSparkle, 0.0, 1.0));
     c.rgb = mix(c.rgb, vec3(1.0, 0.8, 0.86), up * 0.16 * red * uSparkle); // the glow of it up there
   }
-  return vec4(c.rgb * c.a, c.a);
+  return e + vec4(c.rgb * c.a, c.a) * (1.0 - e.a); // an eye's soft edge over her mask
 }
 
 // Lower legs, in source pixels; the line between them leans with the stance.
@@ -394,7 +434,7 @@ const UNIFORMS = [
   'uSit', 'uKickL', 'uKickR',
   'uSmear', 'uEcho', 'uGlitch', 'uGlitchSeed',
   'uSplit', 'uCollapse', 'uDissolve', 'uSparkle', 'uGrade', 'uSil', 'uMisreg', 'uRim', 'uAlpha', 'uPx',
-  'uTime', 'uWall', 'uPhase',
+  'uTime', 'uWall', 'uPhase', 'uLook', 'uBlink',
 ];
 
 export const SPRITE = {
@@ -523,6 +563,8 @@ export class SpriteRenderer {
     gl.uniform1f(u.uTime, (performance.now() / 1000) % 3600);
     gl.uniform1f(u.uWall, s.wall || 0);
     gl.uniform1f(u.uPhase, s.phase || 0);
+    gl.uniform2f(u.uLook, s.look?.[0] || 0, s.look?.[1] || 0);
+    gl.uniform1f(u.uBlink, s.blink || 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }
